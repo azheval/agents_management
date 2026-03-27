@@ -1,0 +1,30 @@
+{
+  "server": {
+    "listen_address": ":50051"
+  },
+  "webserver": {
+    "listen_address": ":8080"
+  },
+  "database": {
+    "host": "localhost",
+    "port": "5432",
+    "username": "admin",
+    "password": "password",
+    "dbname": "agent_management",
+    "sslmode": "disable"
+  },
+  "agent_status_service": {
+    "check_interval": "1m",
+    "inactive_threshold": "2m"
+  },
+  "logging": {
+    "directory": "logs",
+    "file_pattern": "server-%Y-%m-%d-%H.log",
+    "max_age_hours": 72,
+    "log_level": "INFO"
+  },
+  "telegram": {
+    "bot_token": "",
+    "chat_id": 0
+  }
+}

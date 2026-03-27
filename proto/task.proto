@@ -1,0 +1,60 @@
+// protos/task.proto
+syntax = "proto3";
+
+package agent_management;
+
+option go_package = "github.com/your_org/agent-management/api";
+
+service TaskService {
+  // Двунаправленный поток для назначения задач и получения подтверждений
+  rpc AssignTasks (stream TaskAcknowledgement) returns (stream TaskCommand);
+  
+  // Новый RPC для получения пакета задачи
+  rpc GetTaskPackage(GetTaskPackageRequest) returns (stream FileChunk);
+}
+
+// --- Сообщения для получения пакетов ---
+
+message GetTaskPackageRequest {
+  string task_id = 1;
+}
+
+message FileChunk {
+  bytes content = 1;
+}
+
+// --- Основные сообщения для задач ---
+
+enum TaskType {
+  EXEC_COMMAND = 0;
+  EXEC_PYTHON_SCRIPT = 1;
+  FETCH_FILE = 2; // Агент скачивает файл с сервера
+  PUSH_FILE = 3;  // Агент отправляет файл на сервер
+  AGENT_UPDATE = 4;
+}
+
+enum TaskAcknowledgementStatus {
+  RECEIVED = 0;
+  PROCESSING = 1;
+  ERROR = 2;
+}
+
+message TaskCommand {
+  string task_id = 1;
+  TaskType task_type = 2;
+  string command = 3; // Для EXEC_COMMAND
+  repeated string args = 4; // Для EXEC_COMMAND
+  //
+  // Поле script_content (5) удалено
+  //
+  string source_path = 6;
+  string destination_path = 7;
+  int32 timeout_seconds = 8;
+  string entrypoint_script = 9; // Для EXEC_PYTHON_SCRIPT, указывает на главный файл в пакете
+}
+
+message TaskAcknowledgement {
+  string task_id = 1;
+  TaskAcknowledgementStatus status = 2;
+  string message = 3;
+}

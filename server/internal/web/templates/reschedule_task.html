@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - Reschedule Task</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+</head>
+<body class="bg-gray-100">
+    <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900">Agent Management</h1>
+            <div>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
+                <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="bg-white p-8 rounded-lg shadow-md">
+                <h2 class="text-xl font-bold text-gray-800 mb-6">Reschedule Task: {{.Task.ID}}</h2>
+                <form id="reschedule-task-form" method="post">
+                    
+                    <!-- Scheduling Section -->
+                    <div class="mt-6 border-t pt-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Scheduling</h3>
+                        <div id="schedule-type-container" class="flex items-center space-x-4 mb-4">
+                            <label class="block text-gray-700 text-sm font-bold">Execution:</label>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-immediate" name="schedule_type" value="IMMEDIATE" {{if eq .Task.ScheduleType.String "IMMEDIATE"}}checked{{end}} class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-immediate" class="ml-2 block text-sm text-gray-900">Immediate</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-once" name="schedule_type" value="ONCE" {{if eq .Task.ScheduleType.String "ONCE"}}checked{{end}} class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-once" class="ml-2 block text-sm text-gray-900">Scheduled</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-recurring" name="schedule_type" value="RECURRING" {{if eq .Task.ScheduleType.String "RECURRING"}}checked{{end}} class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-recurring" class="ml-2 block text-sm text-gray-900">Recurring</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-chained" name="schedule_type" value="CHAINED" {{if eq .Task.ScheduleType.String "CHAINED"}}checked{{end}} class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-chained" class="ml-2 block text-sm text-gray-900">Chained</label>
+                            </div>
+                        </div>
+
+                        <div id="schedule-params-container" class="space-y-4">
+                            <!-- Scheduled (ONCE) -->
+                            <div id="param_ONCE" class="schedule-param hidden">
+                                <label for="scheduled_at" class="block text-sm font-medium text-gray-700">Execution Time (UTC)</label>
+                                <input type="datetime-local" name="scheduled_at" id="scheduled_at" value="{{.Task.ScheduledAt.Time.Format "2006-01-02T15:04"}}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+
+                            <!-- Recurring -->
+                            <div id="param_RECURRING" class="schedule-param hidden">
+                                <label for="cron_expression" class="block text-sm font-medium text-gray-700">Cron Expression</label>
+                                <input type="text" name="cron_expression" id="cron_expression" value="{{.Task.CronExpression.String}}" placeholder="e.g., '0 0 * * *' for daily at midnight" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+
+                            <!-- Chained -->
+                            <div id="param_CHAINED" class="schedule-param hidden">
+                                <label for="prerequisite_task_id" class="block text-sm font-medium text-gray-700">Prerequisite Task</label>
+                                <select name="prerequisite_task_id" id="prerequisite_task_id" class="mt-1 block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">-- Select a Task --</option>
+                                    {{range .Tasks}}
+                                        <option value="{{.ID}}" {{if eq .ID $.Task.PrerequisiteTaskID.UUID.String}}selected{{end}}>{{.ID}} ({{.Type}})</option>
+                                    {{end}}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-8">
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded focus:outline-none focus:shadow-outline">
+                            Update Schedule
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script>
+        function updateForm() {
+            const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
+            document.querySelectorAll('.schedule-param').forEach(p => {
+                p.classList.add('hidden');
+                p.querySelectorAll('input, select').forEach(input => input.disabled = true);
+            });
+
+            if (scheduleType !== 'IMMEDIATE') {
+                const selectedScheduleDiv = document.getElementById('param_' + scheduleType);
+                if (selectedScheduleDiv) {
+                    selectedScheduleDiv.classList.remove('hidden');
+                    selectedScheduleDiv.querySelectorAll('input, select').forEach(input => input.disabled = false);
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('input[name="schedule_type"]').forEach(radio => {
+                radio.addEventListener('change', updateForm);
+            });
+
+            flatpickr("#scheduled_at", {
+                enableTime: true,
+                dateFormat: "Y-m-d H:i",
+                time_24hr: true
+            });
+            
+            updateForm();
+        });
+    </script>
+</body>
+</html>

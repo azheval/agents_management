@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - Metrics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-100">
+
+    <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900">Agent Management</h1>
+            <div>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
+                <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-800">Agent Metrics</h2>
+                    <p class="text-sm text-gray-500 font-mono">{{.Agent.Hostname}} ({{.Agent.ID}})</p>
+                </div>
+                <a href="/" class="px-4 py-2 text-sm text-blue-600 bg-blue-100 hover:bg-blue-200 rounded-md">Back to Agents</a>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                {{if .ChartJSData}}
+                <div class="chart-container" style="position: relative; height:60vh; width:80vw">
+                    <canvas id="metricsChart"></canvas>
+                </div>
+
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const ctx = document.getElementById('metricsChart');
+                        if (ctx) {
+                            const chartData = {{.ChartJSData}};
+                            new Chart(ctx, {
+                                type: 'line',
+                                data: chartData,
+                                options: {
+                                    responsive: true,
+                                    maintainAspectRatio: false,
+                                    plugins: {
+                                        legend: { position: 'top' },
+                                        title: { display: true, text: 'System Metrics (Last 6 Hours)' }
+                                    },
+                                    scales: {
+                                        y: {
+                                            beginAtZero: true,
+                                            max: 100,
+                                            title: { display: true, text: 'Usage (%)' }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    });
+                </script>
+                {{else}}
+                <p class="text-center text-gray-500 py-10">No metric data available for the selected time range.</p>
+                {{end}}
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>

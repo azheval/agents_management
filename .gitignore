@@ -1,0 +1,6 @@
+*.exe
+logs
+example
+agent.id
+
+uploads/

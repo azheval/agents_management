@@ -1,0 +1,95 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary_ext: ""
+            zip_ext: ".tar.gz"
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            binary_ext: ".exe"
+            zip_ext: ".zip"
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.25'
+
+    - name: Get dependencies
+      run: go mod download
+
+    - name: Build server
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        go build -o server${{ matrix.binary_ext }} ./server/cmd/server
+
+    - name: Build agent
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+      run: |
+        go build -o agent${{ matrix.binary_ext }} ./agent/cmd/agent
+
+    - name: Package binaries
+      shell: bash
+      run: |
+        if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          7z a -tzip agent-management-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.zip_ext }} server${{ matrix.binary_ext }} agent${{ matrix.binary_ext }}
+        else
+          tar czf agent-management-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.zip_ext }} server${{ matrix.binary_ext }} agent${{ matrix.binary_ext }}
+        fi
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: agent-management-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: agent-management-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.zip_ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Display artifacts
+      run: ls -R ./artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        draft: false
+        prerelease: false
+        files: ./artifacts/**/*
+        generate_release_notes: true

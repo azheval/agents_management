@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - New Task</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.2.0/crypto-js.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        .ts-wrapper.multi .ts-control > div {
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        .ts-wrapper.multi .ts-control > div.status-online {
+            background-color: #dcfce7; border-color: #86efac; color: #166534;
+        }
+        .ts-wrapper.multi .ts-control > div.status-offline {
+            background-color: #f1f5f9; border-color: #e2e8f0; color: #334155;
+        }
+        .ts-wrapper.multi .ts-control > div.status-disconnected {
+            background-color: #fee2e2; border-color: #fca5a5; color: #991b1b;
+        }
+        .ts-dropdown .option {
+            display: flex;
+            align-items: center;
+        }
+        .ts-dropdown .option .status-dot {
+            width: 10px; height: 10px; border-radius: 50%; margin-right: 10px;
+        }
+        .ts-dropdown .option .status-dot.status-online { background-color: #22c55e; }
+        .ts-dropdown .option .status-dot.status-offline { background-color: #94a3b8; }
+        .ts-dropdown .option .status-dot.status-disconnected { background-color: #ef4444; }
+
+        /* File Uploader Styles */
+        .file-dropzone {
+            border: 2px dashed #d1d5db;
+            border-radius: 0.5rem;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+        }
+        .file-dropzone.drag-over {
+            background-color: #e0f2fe;
+            border-color: #3b82f6;
+        }
+        .file-list {
+            margin-top: 1rem;
+        }
+        .file-list-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem;
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+            margin-bottom: 0.5rem;
+        }
+        .file-list-item .file-name {
+            font-weight: 500;
+            color: #374151;
+        }
+        .file-list-item .file-size {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+        .file-list-item .remove-btn {
+            color: #ef4444;
+            cursor: pointer;
+        }
+        .entrypoint-label {
+            display: flex;
+            align-items: center;
+            font-size: 0.875rem;
+            color: #374151;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900">Agent Management</h1>
+            <div>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
+                <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="max-w-4xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="bg-white p-8 rounded-lg shadow-md">
+                <form id="new-task-form" method="post" enctype="multipart/form-data">
+                    
+                    <div class="mb-4">
+                        <label for="agent_id" class="block text-gray-700 text-sm font-bold mb-2">Agents:</label>
+                        <select name="agent_id" id="agent_id" required multiple>
+                            {{range .Agents}}
+                                <option value="{{.ID}}" data-status="{{.Status}}">{{.Hostname}} ({{.ID}})</option>
+                            {{end}}
+                        </select>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="task_type" class="block text-gray-700 text-sm font-bold mb-2">Task Type:</label>
+                        <select name="task_type" id="task_type" required class="block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500" onchange="updateForm()">
+                            <option value="">-- Select a Type --</option>
+                            <option value="EXEC_COMMAND" data-description="Executes a shell command on the selected agent(s).">EXEC_COMMAND</option>
+                            <option value="EXEC_PYTHON_SCRIPT" data-description="Executes a Python script on the selected agent(s).">EXEC_PYTHON_SCRIPT</option>
+                            <option value="FETCH_FILE" data-description="Copies a file from the selected agent(s) back to the server.">FETCH_FILE</option>
+                            <option value="PUSH_FILE" data-description="Sends a file from the server to the selected agent(s).">PUSH_FILE</option>
+                            <option value="AGENT_UPDATE" data-description="Updates the agent binary on the selected machine(s).">AGENT_UPDATE</option>
+                        </select>
+                        <div id="task_type_description" class="text-sm text-gray-600 mt-2 min-h-[20px]"></div>
+                    </div>
+
+                    <div class="mb-6">
+                        <label for="description" class="block text-gray-700 text-sm font-bold mb-2">Description</label>
+                        <input type="text" name="description" id="description" placeholder="Optional task description" class="block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+
+                    <div class="space-y-4" id="task-params-container">
+                        <!-- EXEC_COMMAND -->
+                        <div id="param_EXEC_COMMAND" class="task-param hidden">
+                            <div>
+                                <label for="command" class="block text-sm font-medium text-gray-700">Command</label>
+                                <input type="text" name="command" id="command" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label for="args" class="block text-sm font-medium text-gray-700">Arguments (comma-separated)</label>
+                                <input type="text" name="args" id="args" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                        </div>
+
+                        <!-- File Upload Template -->
+                        <div id="file-uploader-template" class="hidden">
+                            <div class="file-upload-container">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Files</label>
+                                <div class="file-dropzone">
+                                    <input type="file" class="hidden file-input" multiple />
+                                    <p>Drag & drop files here, or <span class="text-blue-600 font-semibold">click to browse</span></p>
+                                </div>
+                                <div class="file-list mt-4"></div>
+                            </div>
+                        </div>
+
+                        <!-- EXEC_PYTHON_SCRIPT -->
+                        <div id="param_EXEC_PYTHON_SCRIPT" class="task-param hidden"></div>
+
+                        <!-- FETCH_FILE -->
+                        <div id="param_FETCH_FILE" class="task-param hidden">
+                            <div>
+                                <label for="source_path_fetch" class="block text-sm font-medium text-gray-700">Agent Path (source)</label>
+                                <input type="text" name="source_path_fetch" id="source_path_fetch" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label for="destination_path_fetch" class="block text-sm font-medium text-gray-700">Server Path (destination)</label>
+                                <input type="text" name="destination_path_fetch" id="destination_path_fetch" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                        </div>
+
+                        <!-- PUSH_FILE -->
+                        <div id="param_PUSH_FILE" class="task-param hidden">
+                             <!-- File upload component will be populated here -->
+                             <div class="mt-4">
+                                <label for="destination_path_push" class="block text-sm font-medium text-gray-700">Agent Path (destination file or directory)</label>
+                                <input type="text" name="destination_path_push" id="destination_path_push" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+                        </div>
+
+                        <!-- AGENT_UPDATE -->
+                        <div id="param_AGENT_UPDATE" class="task-param hidden">
+                             <div id="agent-update-hash-container" class="mt-4 hidden">
+                                <label class="block text-sm font-medium text-gray-700">SHA256 Checksum</label>
+                                <input type="text" id="agent-update-hash" name="checksum" readonly class="mt-1 block w-full bg-gray-100 border border-gray-300 rounded-md shadow-sm py-2 px-3">
+                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Scheduling Section -->
+                    <div class="mt-6 border-t pt-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Scheduling</h3>
+                        <div id="schedule-type-container" class="flex items-center space-x-4 mb-4">
+                            <label class="block text-gray-700 text-sm font-bold">Execution:</label>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-immediate" name="schedule_type" value="IMMEDIATE" checked class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-immediate" class="ml-2 block text-sm text-gray-900">Immediate</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-once" name="schedule_type" value="ONCE" class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-once" class="ml-2 block text-sm text-gray-900">Scheduled</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-recurring" name="schedule_type" value="RECURRING" class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-recurring" class="ml-2 block text-sm text-gray-900">Recurring</label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" id="schedule-chained" name="schedule_type" value="CHAINED" class="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500">
+                                <label for="schedule-chained" class="ml-2 block text-sm text-gray-900">Chained</label>
+                            </div>
+                        </div>
+                        <div id="schedule-params-container" class="space-y-4">
+                            <!-- Scheduled (ONCE) -->
+                            <div id="param_ONCE" class="schedule-param hidden">
+                                <label for="scheduled_at" class="block text-sm font-medium text-gray-700">Execution Time (UTC)</label>
+                                <input type="datetime-local" name="scheduled_at" id="scheduled_at" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+
+                            <!-- Recurring -->
+                            <div id="param_RECURRING" class="schedule-param hidden">
+                                <label for="cron_expression" class="block text-sm font-medium text-gray-700">Cron Expression</label>
+                                <input type="text" name="cron_expression" id="cron_expression" placeholder="e.g., '0 0 * * *' for daily at midnight" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            </div>
+
+                            <!-- Chained -->
+                            <div id="param_CHAINED" class="schedule-param hidden">
+                                <label for="prerequisite_task_id" class="block text-sm font-medium text-gray-700">Prerequisite Task</label>
+                                <select name="prerequisite_task_id" id="prerequisite_task_id" class="mt-1 block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">-- Select a Task --</option>
+                                    {{range .SelectableTasks}}
+                                        <option value="{{.ID}}">{{.Description}}</option>
+                                    {{end}}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6">
+                        <label for="timeout_seconds" class="block text-sm font-medium text-gray-700">Timeout (seconds)</label>
+                        <input type="number" name="timeout_seconds" id="timeout_seconds" value="60" class="mt-1 block w-1/3 border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+
+                    <div class="mt-8">
+                        <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded focus:outline-none focus:shadow-outline">
+                            Create Task
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script>
+        const fileStore = {
+            EXEC_PYTHON_SCRIPT: [],
+            PUSH_FILE: [],
+            AGENT_UPDATE: []
+        };
+        
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function calculateHash(file, callback) {
+            const reader = new FileReader();
+            reader.onload = function (event) {
+                const binary = event.target.result;
+                const hash = CryptoJS.SHA256(CryptoJS.lib.WordArray.create(binary));
+                callback(hash.toString(CryptoJS.enc.Hex));
+            };
+            reader.readAsArrayBuffer(file);
+        }
+        
+        function renderFileList(taskType) {
+            const listContainer = document.querySelector(`#param_${taskType} .file-list`);
+            if (!listContainer) return;
+            listContainer.innerHTML = '';
+            
+            fileStore[taskType].forEach((file, index) => {
+                const item = document.createElement('div');
+                item.className = 'file-list-item';
+                
+                let entrypointRadio = '';
+                if (taskType === 'EXEC_PYTHON_SCRIPT') {
+                    entrypointRadio = `
+                        <label class="entrypoint-label mr-4">
+                            <input type="radio" name="entrypoint_script" value="${file.name}" class="mr-2" ${index === 0 ? 'checked' : ''}>
+                            Entrypoint
+                        </label>`;
+                }
+
+                item.innerHTML = `
+                    <div class="flex items-center">
+                        <div>
+                            <div class="file-name">${file.name}</div>
+                            <div class="file-size">${formatBytes(file.size)}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        ${entrypointRadio}
+                        <svg onclick="removeFile('${taskType}', ${index})" class="remove-btn w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </div>
+                `;
+                listContainer.appendChild(item);
+            });
+
+            if (taskType === 'AGENT_UPDATE') {
+                const hashContainer = document.getElementById('agent-update-hash-container');
+                const hashInput = document.getElementById('agent-update-hash');
+                if (fileStore.AGENT_UPDATE.length > 0) {
+                    calculateHash(fileStore.AGENT_UPDATE[0], (hash) => {
+                        hashInput.value = hash;
+                        hashContainer.classList.remove('hidden');
+                    });
+                } else {
+                    hashInput.value = '';
+                    hashContainer.classList.add('hidden');
+                }
+            }
+        }
+
+        function handleFiles(taskType, files) {
+            const isSingleFile = taskType === 'AGENT_UPDATE';
+            if (isSingleFile) {
+                fileStore[taskType] = [files[0]];
+            } else {
+                fileStore[taskType].push(...files);
+            }
+            renderFileList(taskType);
+        }
+
+        function removeFile(taskType, index) {
+            fileStore[taskType].splice(index, 1);
+            renderFileList(taskType);
+        }
+
+        function setupFileUploader(taskType) {
+            const paramDiv = document.getElementById(`param_${taskType}`);
+            const template = document.getElementById('file-uploader-template');
+            const uploader = template.cloneNode(true);
+            uploader.id = `uploader-for-${taskType}`;
+            uploader.classList.remove('hidden');
+            paramDiv.appendChild(uploader);
+
+            const dropzone = uploader.querySelector('.file-dropzone');
+            const fileInput = uploader.querySelector('.file-input');
+
+            dropzone.addEventListener('click', () => fileInput.click());
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropzone.classList.add('drag-over');
+            });
+            dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('drag-over');
+                handleFiles(taskType, e.dataTransfer.files);
+            });
+            fileInput.addEventListener('change', (e) => handleFiles(taskType, e.target.files));
+        }
+
+        function updateForm() {
+            const taskTypeSelect = document.getElementById('task_type');
+            const descriptionDiv = document.getElementById('task_type_description');
+            const selectedOption = taskTypeSelect.options[taskTypeSelect.selectedIndex];
+            const taskType = taskTypeSelect.value;
+            
+            descriptionDiv.textContent = (selectedOption && selectedOption.dataset.description) ? selectedOption.dataset.description : '';
+
+            // Disable all inputs in all param blocks first, and hide the blocks
+            document.querySelectorAll('.task-param').forEach(p => {
+                p.classList.add('hidden');
+                p.querySelectorAll('input, select, textarea').forEach(input => input.disabled = true);
+            });
+
+            // Show the parameter block for the selected task type and enable its inputs
+            if (taskType) {
+                const selectedParamDiv = document.getElementById('param_' + taskType);
+                if (selectedParamDiv) {
+                    selectedParamDiv.classList.remove('hidden');
+                    selectedParamDiv.querySelectorAll('input, select, textarea').forEach(input => input.disabled = false);
+                }
+            }
+            
+            // Handle Scheduling parameters
+            const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
+            document.querySelectorAll('.schedule-param').forEach(p => {
+                p.classList.add('hidden');
+                p.querySelectorAll('input, select').forEach(input => input.disabled = true);
+            });
+
+            if (scheduleType !== 'IMMEDIATE') {
+                const selectedScheduleDiv = document.getElementById('param_' + scheduleType);
+                if (selectedScheduleDiv) {
+                    selectedScheduleDiv.classList.remove('hidden');
+                    selectedScheduleDiv.querySelectorAll('input, select').forEach(input => input.disabled = false);
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('input[name="schedule_type"]').forEach(radio => {
+                radio.addEventListener('change', updateForm);
+            });
+            const tomSelectInstance = new TomSelect('#agent_id', {
+                plugins: ['remove_button'],
+                create: false,
+                render: {
+                    option: function(data, escape) {
+                        return `<div class="option">
+                                    <span class="status-dot status-${escape(data.status)}"></span>
+                                    <span>${escape(data.text)}</span>
+                                </div>`;
+                    },
+                    item: function(data, escape) {
+                        return `<div class="item status-${escape(data.status)}">
+                                    ${escape(data.text)}
+                                </div>`;
+                    }
+                },
+                onInitialize: function() {
+                    const tomSelect = this;
+                    const options = Array.from(document.getElementById('agent_id').options);
+                    options.forEach(opt => {
+                        const optionData = {
+                            value: opt.value,
+                            text: opt.text,
+                            status: opt.dataset.status
+                        };
+                        tomSelect.addOption(optionData);
+                    });
+                    const params = new URLSearchParams(window.location.search);
+                    const agentId = params.get('agent_id');
+                    if (agentId) {
+                        tomSelect.setValue(agentId);
+                    }
+                 }
+            });
+
+            flatpickr("#scheduled_at", {
+                enableTime: true,
+                dateFormat: "Y-m-d H:i",
+                time_24hr: true
+            });
+
+            setupFileUploader('EXEC_PYTHON_SCRIPT');
+            setupFileUploader('PUSH_FILE');
+            setupFileUploader('AGENT_UPDATE');
+
+            updateForm();
+
+            document.getElementById('new-task-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                const form = e.target;
+                const formData = new FormData(form);
+                const taskType = formData.get('task_type');
+                
+                if (fileStore[taskType]) {
+                    fileStore[taskType].forEach(file => {
+                        formData.append('files', file, file.name);
+                    });
+                }
+                
+                const agentIds = tomSelectInstance.getValue();
+                formData.delete('agent_id');
+                agentIds.forEach(id => formData.append('agent_id', id));
+
+                // The actual fetch call to submit the form data
+                fetch('/task/new', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (response.ok) {
+                        // Redirect to the tasks page on success
+                        window.location.href = '/tasks';
+                    } else {
+                        // Basic error handling
+                        alert('Error creating task. Please check the console for details.');
+                        console.error('Error:', response.statusText);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('A network error occurred. Please try again.');
+                });
+            });
+        });
+    </script>
+</body>
+</html>

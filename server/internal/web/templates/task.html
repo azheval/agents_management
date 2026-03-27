@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - Task Details</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+    <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900">Agent Management</h1>
+            <div>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
+                <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-3xl font-bold text-gray-800">Task Details</h2>
+                <div>
+                    {{if and (eq .Task.Status "pending") .Task.ScheduleType.Valid}}
+                        <a href="/task/{{.Task.ID}}/reschedule" class="ml-4 px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md">Reschedule</a>
+                    {{end}}
+                     <a href="/tasks" class="px-4 py-2 text-sm text-blue-600 bg-blue-100 hover:bg-blue-200 rounded-md">Back to Tasks</a>
+                </div>
+            </div>
+
+            <!-- Task Information -->
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Task Information</h3>
+                {{with .Task}}
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                        <div><strong class="text-gray-600">Task ID:</strong> <span class="font-mono">{{.ID}}</span></div>
+                        <div><strong class="text-gray-600">Agent ID:</strong> <span class="font-mono">{{.AgentID}}</span></div>
+                        <div><strong class="text-gray-600">Status:</strong> <span class="font-semibold">{{.Status}}</span></div>
+                        <div><strong class="text-gray-600">Type:</strong> <span>{{.TaskType}}</span></div>
+                        <div class="col-span-full"><strong class="text-gray-600">Command:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if .Command.Valid}}{{.Command.String}}{{else}}N/A{{end}}</code></div>
+                        <div class="col-span-full"><strong class="text-gray-600">Arguments:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{range .Args}}{{.}} {{end}}</code></div>
+                        <div><strong class="text-gray-600">Created At:</strong> <span>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span></div>
+                        <div><strong class="text-gray-600">Started At:</strong> <span>{{if .StartedAt.Valid}}{{.StartedAt.Time.Format "2006-01-02 15:04:05"}}{{else}}N/A{{end}}</span></div>
+                        <div><strong class="text-gray-600">Completed At:</strong> <span>{{if .CompletedAt.Valid}}{{.CompletedAt.Time.Format "2006-01-02 15:04:05"}}{{else}}N/A{{end}}</span></div>
+                    </div>
+                {{else}}
+                    <p class="text-gray-500">Task information not found.</p>
+                {{end}}
+            </div>
+
+            <!-- Task Result -->
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Task Result</h3>
+                {{with .Result}}
+                     <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                        <div><strong class="text-gray-600">Final Status:</strong> <span class="font-semibold">{{.Status}}</span></div>
+                        <div><strong class="text-gray-600">Exit Code:</strong> <span>{{if .ExitCode.Valid}}{{.ExitCode.Int32}}{{else}}N/A{{end}}</span></div>
+                        <div><strong class="text-gray-600">Duration (ms):</strong> <span>{{if .DurationMs.Valid}}{{.DurationMs.Int64}}{{else}}N/A{{end}}</span></div>
+                    </div>
+                    <h4 class="font-bold mt-6 mb-2">Output:</h4>
+                    <pre class="bg-gray-900 text-white text-sm p-4 rounded-md w-full overflow-x-auto">{{if .Output.Valid}}{{.Output.String}}{{else}}No output captured.{{end}}</pre>
+                {{else}}
+                    <p class="text-gray-500">Task result not available yet.</p>
+                {{end}}
+            </div>
+
+            <!-- Logs -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Logs</h3>
+                <div class="font-mono text-xs">
+                    {{if .Logs}}
+                        {{range .Logs}}
+                        <div class="flex items-start space-x-4 p-2 hover:bg-gray-50">
+                            <span class="text-gray-400 whitespace-nowrap">{{.Timestamp.Format "15:04:05.000"}}</span>
+                            {{if eq .Level "ERROR"}}<span class="font-bold text-red-500">{{.Level}}</span>{{end}}
+                            {{if eq .Level "WARN"}}<span class="font-bold text-yellow-500">{{.Level}}</span>{{end}}
+                            {{if eq .Level "INFO"}}<span class="font-bold text-blue-500">{{.Level}}</span>{{end}}
+                            {{if eq .Level "DEBUG"}}<span class="font-bold text-gray-500">{{.Level}}</span>{{end}}
+                            <span class="break-all">{{.Message}}</span>
+                        </div>
+                        {{end}}
+                    {{else}}
+                        <p class="text-center text-gray-500 py-4">No logs found for this task.</p>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>
