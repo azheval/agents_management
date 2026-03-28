@@ -450,3 +450,202 @@ func (mr *MockMetricRepositoryMockRecorder) StoreAgentMetric(ctx, metric any) *g
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StoreAgentMetric", reflect.TypeOf((*MockMetricRepository)(nil).StoreAgentMetric), ctx, metric)
 }
+
+// MockNotificationRepository is a mock of NotificationRepository interface.
+type MockNotificationRepository struct {
+	ctrl     *gomock.Controller
+	recorder *MockNotificationRepositoryMockRecorder
+	isgomock struct{}
+}
+
+// MockNotificationRepositoryMockRecorder is the mock recorder for MockNotificationRepository.
+type MockNotificationRepositoryMockRecorder struct {
+	mock *MockNotificationRepository
+}
+
+// NewMockNotificationRepository creates a new mock instance.
+func NewMockNotificationRepository(ctrl *gomock.Controller) *MockNotificationRepository {
+	mock := &MockNotificationRepository{ctrl: ctrl}
+	mock.recorder = &MockNotificationRepositoryMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockNotificationRepository) EXPECT() *MockNotificationRepositoryMockRecorder {
+	return m.recorder
+}
+
+// CreateNotificationDelivery mocks base method.
+func (m *MockNotificationRepository) CreateNotificationDelivery(ctx context.Context, delivery *storage.NotificationDelivery) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateNotificationDelivery", ctx, delivery)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateNotificationDelivery indicates an expected call of CreateNotificationDelivery.
+func (mr *MockNotificationRepositoryMockRecorder) CreateNotificationDelivery(ctx, delivery any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateNotificationDelivery", reflect.TypeOf((*MockNotificationRepository)(nil).CreateNotificationDelivery), ctx, delivery)
+}
+
+// CreateNotificationEvent mocks base method.
+func (m *MockNotificationRepository) CreateNotificationEvent(ctx context.Context, event *storage.NotificationEvent) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CreateNotificationEvent", ctx, event)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CreateNotificationEvent indicates an expected call of CreateNotificationEvent.
+func (mr *MockNotificationRepositoryMockRecorder) CreateNotificationEvent(ctx, event any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateNotificationEvent", reflect.TypeOf((*MockNotificationRepository)(nil).CreateNotificationEvent), ctx, event)
+}
+
+// FindLatestNotificationEventByDedupKeySince mocks base method.
+func (m *MockNotificationRepository) FindLatestNotificationEventByDedupKeySince(ctx context.Context, dedupKey string, since time.Time, excludeID uuid.UUID) (*storage.NotificationEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FindLatestNotificationEventByDedupKeySince", ctx, dedupKey, since, excludeID)
+	ret0, _ := ret[0].(*storage.NotificationEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FindLatestNotificationEventByDedupKeySince indicates an expected call of FindLatestNotificationEventByDedupKeySince.
+func (mr *MockNotificationRepositoryMockRecorder) FindLatestNotificationEventByDedupKeySince(ctx, dedupKey, since, excludeID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindLatestNotificationEventByDedupKeySince", reflect.TypeOf((*MockNotificationRepository)(nil).FindLatestNotificationEventByDedupKeySince), ctx, dedupKey, since, excludeID)
+}
+
+// GetNotificationDeliveryByID mocks base method.
+func (m *MockNotificationRepository) GetNotificationDeliveryByID(ctx context.Context, id uuid.UUID) (*storage.NotificationDelivery, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNotificationDeliveryByID", ctx, id)
+	ret0, _ := ret[0].(*storage.NotificationDelivery)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNotificationDeliveryByID indicates an expected call of GetNotificationDeliveryByID.
+func (mr *MockNotificationRepositoryMockRecorder) GetNotificationDeliveryByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNotificationDeliveryByID", reflect.TypeOf((*MockNotificationRepository)(nil).GetNotificationDeliveryByID), ctx, id)
+}
+
+// GetNotificationEventByID mocks base method.
+func (m *MockNotificationRepository) GetNotificationEventByID(ctx context.Context, id uuid.UUID) (*storage.NotificationEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetNotificationEventByID", ctx, id)
+	ret0, _ := ret[0].(*storage.NotificationEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetNotificationEventByID indicates an expected call of GetNotificationEventByID.
+func (mr *MockNotificationRepositoryMockRecorder) GetNotificationEventByID(ctx, id any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNotificationEventByID", reflect.TypeOf((*MockNotificationRepository)(nil).GetNotificationEventByID), ctx, id)
+}
+
+// ListNotificationDeliveriesByEventID mocks base method.
+func (m *MockNotificationRepository) ListNotificationDeliveriesByEventID(ctx context.Context, eventID uuid.UUID) ([]*storage.NotificationDelivery, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNotificationDeliveriesByEventID", ctx, eventID)
+	ret0, _ := ret[0].([]*storage.NotificationDelivery)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNotificationDeliveriesByEventID indicates an expected call of ListNotificationDeliveriesByEventID.
+func (mr *MockNotificationRepositoryMockRecorder) ListNotificationDeliveriesByEventID(ctx, eventID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNotificationDeliveriesByEventID", reflect.TypeOf((*MockNotificationRepository)(nil).ListNotificationDeliveriesByEventID), ctx, eventID)
+}
+
+// ListNotificationDeliveriesForDispatch mocks base method.
+func (m *MockNotificationRepository) ListNotificationDeliveriesForDispatch(ctx context.Context, now time.Time, limit int) ([]*storage.NotificationDelivery, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNotificationDeliveriesForDispatch", ctx, now, limit)
+	ret0, _ := ret[0].([]*storage.NotificationDelivery)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNotificationDeliveriesForDispatch indicates an expected call of ListNotificationDeliveriesForDispatch.
+func (mr *MockNotificationRepositoryMockRecorder) ListNotificationDeliveriesForDispatch(ctx, now, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNotificationDeliveriesForDispatch", reflect.TypeOf((*MockNotificationRepository)(nil).ListNotificationDeliveriesForDispatch), ctx, now, limit)
+}
+
+// ListNotificationEvents mocks base method.
+func (m *MockNotificationRepository) ListNotificationEvents(ctx context.Context, limit int) ([]*storage.NotificationEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNotificationEvents", ctx, limit)
+	ret0, _ := ret[0].([]*storage.NotificationEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNotificationEvents indicates an expected call of ListNotificationEvents.
+func (mr *MockNotificationRepositoryMockRecorder) ListNotificationEvents(ctx, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNotificationEvents", reflect.TypeOf((*MockNotificationRepository)(nil).ListNotificationEvents), ctx, limit)
+}
+
+// ListNotificationEventsByTaskID mocks base method.
+func (m *MockNotificationRepository) ListNotificationEventsByTaskID(ctx context.Context, taskID uuid.UUID) ([]*storage.NotificationEvent, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListNotificationEventsByTaskID", ctx, taskID)
+	ret0, _ := ret[0].([]*storage.NotificationEvent)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListNotificationEventsByTaskID indicates an expected call of ListNotificationEventsByTaskID.
+func (mr *MockNotificationRepositoryMockRecorder) ListNotificationEventsByTaskID(ctx, taskID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNotificationEventsByTaskID", reflect.TypeOf((*MockNotificationRepository)(nil).ListNotificationEventsByTaskID), ctx, taskID)
+}
+
+// ScheduleNotificationDeliveryRetry mocks base method.
+func (m *MockNotificationRepository) ScheduleNotificationDeliveryRetry(ctx context.Context, id uuid.UUID, maxAttempts int32, nextRetryAt time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ScheduleNotificationDeliveryRetry", ctx, id, maxAttempts, nextRetryAt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ScheduleNotificationDeliveryRetry indicates an expected call of ScheduleNotificationDeliveryRetry.
+func (mr *MockNotificationRepositoryMockRecorder) ScheduleNotificationDeliveryRetry(ctx, id, maxAttempts, nextRetryAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ScheduleNotificationDeliveryRetry", reflect.TypeOf((*MockNotificationRepository)(nil).ScheduleNotificationDeliveryRetry), ctx, id, maxAttempts, nextRetryAt)
+}
+
+// UpdateNotificationDeliveryStatus mocks base method.
+func (m *MockNotificationRepository) UpdateNotificationDeliveryStatus(ctx context.Context, id uuid.UUID, attempt int32, status storage.NotificationDeliveryStatus, providerMessageID sql.NullString, providerResponseJSON []byte, errorMessage sql.NullString, lastErrorCode sql.NullString, sentAt sql.NullTime, nextRetryAt sql.NullTime) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateNotificationDeliveryStatus", ctx, id, attempt, status, providerMessageID, providerResponseJSON, errorMessage, lastErrorCode, sentAt, nextRetryAt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateNotificationDeliveryStatus indicates an expected call of UpdateNotificationDeliveryStatus.
+func (mr *MockNotificationRepositoryMockRecorder) UpdateNotificationDeliveryStatus(ctx, id, attempt, status, providerMessageID, providerResponseJSON, errorMessage, lastErrorCode, sentAt, nextRetryAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateNotificationDeliveryStatus", reflect.TypeOf((*MockNotificationRepository)(nil).UpdateNotificationDeliveryStatus), ctx, id, attempt, status, providerMessageID, providerResponseJSON, errorMessage, lastErrorCode, sentAt, nextRetryAt)
+}
+
+// UpdateNotificationEventStatus mocks base method.
+func (m *MockNotificationRepository) UpdateNotificationEventStatus(ctx context.Context, id uuid.UUID, status storage.NotificationEventStatus) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateNotificationEventStatus", ctx, id, status)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateNotificationEventStatus indicates an expected call of UpdateNotificationEventStatus.
+func (mr *MockNotificationRepositoryMockRecorder) UpdateNotificationEventStatus(ctx, id, status any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateNotificationEventStatus", reflect.TypeOf((*MockNotificationRepository)(nil).UpdateNotificationEventStatus), ctx, id, status)
+}

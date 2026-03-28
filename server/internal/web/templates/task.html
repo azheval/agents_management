@@ -14,6 +14,7 @@
             <div>
                 <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
                 <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+                <a href="/notifications" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Notifications</a>
             </div>
         </nav>
     </header>
@@ -39,6 +40,9 @@
                         <div><strong class="text-gray-600">Agent ID:</strong> <span class="font-mono">{{.AgentID}}</span></div>
                         <div><strong class="text-gray-600">Status:</strong> <span class="font-semibold">{{.Status}}</span></div>
                         <div><strong class="text-gray-600">Type:</strong> <span>{{.TaskType}}</span></div>
+                        <div><strong class="text-gray-600">Result Contract:</strong> <span>{{if .ResultContract.Valid}}{{.ResultContract.String}}{{else}}N/A{{end}}</span></div>
+                        <div><strong class="text-gray-600">Rule Set:</strong> <span>{{if .NotificationRuleSet.Valid}}{{.NotificationRuleSet.String}}{{else}}default{{end}}</span></div>
+                        <div class="col-span-full"><strong class="text-gray-600">Destinations:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if .DefaultDestinations}}{{range .DefaultDestinations}}{{.}} {{end}}{{else}}N/A{{end}}</code></div>
                         <div class="col-span-full"><strong class="text-gray-600">Command:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if .Command.Valid}}{{.Command.String}}{{else}}N/A{{end}}</code></div>
                         <div class="col-span-full"><strong class="text-gray-600">Arguments:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{range .Args}}{{.}} {{end}}</code></div>
                         <div><strong class="text-gray-600">Created At:</strong> <span>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span></div>
@@ -64,6 +68,31 @@
                 {{else}}
                     <p class="text-gray-500">Task result not available yet.</p>
                 {{end}}
+            </div>
+
+            <!-- Notification Events -->
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Notification Events</h3>
+                <div class="space-y-4">
+                    {{if .NotificationEvents}}
+                        {{range .NotificationEvents}}
+                        <div class="border rounded-lg p-4 text-sm">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="space-y-1">
+                                    <div><strong class="text-gray-600">Event ID:</strong> <a href="/notifications/{{.ID}}" class="font-mono text-blue-600 hover:underline">{{.ID}}</a></div>
+                                    <div><strong class="text-gray-600">Title:</strong> {{.Title}}</div>
+                                    <div><strong class="text-gray-600">Type:</strong> {{.EventType}}</div>
+                                    <div><strong class="text-gray-600">Severity:</strong> {{.Severity}}</div>
+                                    <div><strong class="text-gray-600">Status:</strong> {{.Status}}</div>
+                                </div>
+                                <div class="text-gray-500 whitespace-nowrap">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</div>
+                            </div>
+                        </div>
+                        {{end}}
+                    {{else}}
+                        <p class="text-center text-gray-500 py-4">No notification events linked to this task.</p>
+                    {{end}}
+                </div>
             </div>
 
             <!-- Logs -->

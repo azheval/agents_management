@@ -1,8 +1,12 @@
 package notifier
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 
 	"agent-management/server/internal/storage"
 
@@ -31,6 +35,10 @@ func NewTelegramNotifier(token string, chatID int64, logger *slog.Logger) (*Tele
 		chatID: chatID,
 		logger: logger,
 	}, nil
+}
+
+func (tn *TelegramNotifier) Channel() string {
+	return "telegram"
 }
 
 // NotifyTaskCompletion sends a message to Telegram about task completion.
@@ -105,4 +113,55 @@ Status:   %s -> %s
 
 	tn.logger.Info("Sent agent status telegram notification successfully", "agent_id", agent.ID)
 	return nil
+}
+
+func (tn *TelegramNotifier) DeliverNotificationEvent(ctx context.Context, event *storage.NotificationEvent, delivery *storage.NotificationDelivery) (string, []byte, error) {
+	chatID, err := tn.resolveChatID(delivery.Destination)
+	if err != nil {
+		return "", nil, err
+	}
+
+	msg := tgbotapi.NewMessage(chatID, tn.formatNotificationEventMessage(event))
+	msg.ParseMode = ""
+
+	sentMessage, err := tn.bot.Send(msg)
+	if err != nil {
+		tn.logger.Error("Failed to send telegram delivery", "event_id", event.ID, "delivery_id", delivery.ID, "error", err)
+		return "", nil, err
+	}
+
+	responseJSON, err := json.Marshal(sentMessage)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to marshal telegram response: %w", err)
+	}
+
+	return strconv.Itoa(sentMessage.MessageID), responseJSON, nil
+}
+
+func (tn *TelegramNotifier) resolveChatID(destination string) (int64, error) {
+	trimmed := strings.TrimSpace(destination)
+	if trimmed == "" || trimmed == "default" {
+		if tn.chatID == 0 {
+			return 0, fmt.Errorf("telegram chat id is not configured")
+		}
+		return tn.chatID, nil
+	}
+
+	chatID, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid telegram destination %q: %w", destination, err)
+	}
+	return chatID, nil
+}
+
+func (tn *TelegramNotifier) formatNotificationEventMessage(event *storage.NotificationEvent) string {
+	return fmt.Sprintf(
+		"[ALERT]\nSeverity: %s\nType: %s\nTitle: %s\nSummary: %s\nTask ID: %s\nAgent ID: %s",
+		strings.ToUpper(event.Severity),
+		event.EventType,
+		event.Title,
+		event.Summary,
+		event.TaskID,
+		event.AgentID,
+	)
 }

@@ -94,6 +94,12 @@ docker exec -i agent_db psql -U admin -d agent_management < db/migrations/001_fu
 
 Запаўняецца апісанне задачы, паказваецца файл новай версіі агента. Кантрольная сума разлічваецца аўтаматычна.
 
+У любой задачы можна наладзіць блок `Alert Pipeline` які адпраўляе струмень `stdout` у тэлеграм.
+
+![img_010.png](/docs/img/img_010.png)
+
+![img_011.png](/docs/img/img_011.png)
+
 Выбіраецца неабходны графік выканання каманды, паказваецца таймаўт на выкананне каманды:
 
 - Immediate. Задача выконваецца неадкладна.
@@ -114,3 +120,7 @@ docker exec -i agent_db psql -U admin -d agent_management < db/migrations/001_fu
 Пры запаўненні ў файле `config.json` секцыі ```telegram {}``` будзе атрымана паведамленне аб завяршэнні задачы
 
 ![img_009.png](/docs/img/img_009.png)
+
+## Апавяшчэнні Alert Pipeline
+
+![img_012.png](/docs/img/img_012.png)

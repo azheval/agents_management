@@ -122,6 +122,35 @@
                         <input type="text" name="description" id="description" placeholder="Optional task description" class="block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                     </div>
 
+                    <div class="mt-6 border-t pt-6">
+                        <h3 class="text-lg font-medium text-gray-900 mb-4">Alert Pipeline</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="result_contract" class="block text-sm font-medium text-gray-700">Result Contract</label>
+                                <select name="result_contract" id="result_contract" class="mt-1 block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">None</option>
+                                    <option value="alert_payload.v1">alert_payload.v1</option>
+                                </select>
+                                <p class="mt-1 text-xs text-gray-500">Use `alert_payload.v1` for post-processing tasks.</p>
+                            </div>
+                            <div>
+                                <label for="notification_rule_set" class="block text-sm font-medium text-gray-700">Notification Rule Set</label>
+                                <select name="notification_rule_set" id="notification_rule_set" class="mt-1 block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">default</option>
+                                    <option value="all">all</option>
+                                    <option value="errors_only">errors_only</option>
+                                    <option value="disabled">disabled</option>
+                                </select>
+                                <p class="mt-1 text-xs text-gray-500">`default`: warning/error/critical, `all`: includes info, `disabled`: no delivery.</p>
+                            </div>
+                            <div class="md:col-span-2">
+                                <label for="default_destinations" class="block text-sm font-medium text-gray-700">Default Destinations</label>
+                                <input type="text" name="default_destinations" id="default_destinations" placeholder="telegram or telegram:123456789" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <p class="mt-1 text-xs text-gray-500">Comma-separated list. Example: `telegram`, `telegram:123456789`.</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="space-y-4" id="task-params-container">
                         <!-- EXEC_COMMAND -->
                         <div id="param_EXEC_COMMAND" class="task-param hidden">

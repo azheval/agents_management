@@ -393,8 +393,8 @@ func handleExecCommandTask(agentID string, agentClient pb.AgentServiceClient, ta
 	// 4. Pipe stdout/stderr to the log stream
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go pipeLogs(stdoutPipe, logStream, agentID, task.GetTaskId(), "INFO", &wg, taskLogger)
-	go pipeLogs(stderrPipe, logStream, agentID, task.GetTaskId(), "ERROR", &wg, taskLogger)
+	go pipeLogs(stdoutPipe, logStream, agentID, task.GetTaskId(), "INFO", &wg, taskLogger, nil)
+	go pipeLogs(stderrPipe, logStream, agentID, task.GetTaskId(), "ERROR", &wg, taskLogger, nil)
 
 	// 5. Wait for command to finish
 	err = cmd.Start()
@@ -434,18 +434,23 @@ func handleExecCommandTask(agentID string, agentClient pb.AgentServiceClient, ta
 	taskLogger.Info("Finished task", "status", finalStatus, "exit_code", exitCode)
 }
 
-func pipeLogs(pipe io.ReadCloser, stream pb.AgentService_StreamLogsClient, agentID, taskID, level string, wg *sync.WaitGroup, logger *slog.Logger) {
+func pipeLogs(pipe io.ReadCloser, stream pb.AgentService_StreamLogsClient, agentID, taskID, level string, wg *sync.WaitGroup, logger *slog.Logger, capture *bytes.Buffer) {
 	defer wg.Done()
 	scanner := bufio.NewScanner(pipe)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		line := decodeProcessOutputLine(scanner.Bytes())
+		if capture != nil {
+			capture.WriteString(line)
+			capture.WriteByte('\n')
+		}
 		logEntry := &pb.LogEntry{
 			AgentId:   agentID,
 			TaskId:    taskID,
 			Timestamp: time.Now().Unix(),
 			Level:     level,
-			Message:   decodeProcessOutputLine(scanner.Bytes()),
+			Message:   line,
 		}
 		if err := stream.Send(logEntry); err != nil {
 			logger.Error("Failed to send log entry", "error", err)

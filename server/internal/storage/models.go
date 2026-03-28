@@ -53,27 +53,30 @@ type Agent struct {
 
 // Task corresponds to the 'tasks' table in the database.
 type Task struct {
-	ID                 uuid.UUID      `db:"id" json:"id"`
-	AgentID            uuid.UUID      `db:"agent_id" json:"agentId"`
-	Description        sql.NullString `db:"description" json:"description"`
-	TaskType           TaskType       `db:"task_type" json:"taskType"`
-	Command            sql.NullString `db:"command" json:"command"`
-	Args               pq.StringArray `db:"args" json:"args"`
-	EntrypointScript   sql.NullString `db:"entrypoint_script" json:"entrypointScript"`
-	PackageFiles       pq.StringArray `db:"package_files" json:"packageFiles"`
-	SourcePath         sql.NullString `db:"source_path" json:"sourcePath"`
-	DestinationPath    sql.NullString `db:"destination_path" json:"destinationPath"`
-	TimeoutSeconds     sql.NullInt32  `db:"timeout_seconds" json:"timeoutSeconds"`
-	Status             TaskStatus     `db:"status" json:"status"`
-	ScheduleType       sql.NullString `db:"schedule_type" json:"scheduleType"`
-	CronExpression     sql.NullString `db:"cron_expression" json:"cronExpression"`
-	PrerequisiteTaskID uuid.NullUUID  `db:"prerequisite_task_id" json:"prerequisiteTaskId"`
-	ScheduledAt        sql.NullTime   `db:"scheduled_at" json:"scheduledAt"`
-	StartedAt          sql.NullTime   `db:"started_at" json:"startedAt"`
-	CompletedAt        sql.NullTime   `db:"completed_at" json:"completedAt"`
-	CreatedBy          sql.NullString `db:"created_by" json:"createdBy"`
-	CreatedAt          time.Time      `db:"created_at" json:"createdAt"`
-	UpdatedAt          time.Time      `db:"updated_at" json:"updatedAt"`
+	ID                  uuid.UUID      `db:"id" json:"id"`
+	AgentID             uuid.UUID      `db:"agent_id" json:"agentId"`
+	Description         sql.NullString `db:"description" json:"description"`
+	TaskType            TaskType       `db:"task_type" json:"taskType"`
+	Command             sql.NullString `db:"command" json:"command"`
+	Args                pq.StringArray `db:"args" json:"args"`
+	EntrypointScript    sql.NullString `db:"entrypoint_script" json:"entrypointScript"`
+	PackageFiles        pq.StringArray `db:"package_files" json:"packageFiles"`
+	SourcePath          sql.NullString `db:"source_path" json:"sourcePath"`
+	DestinationPath     sql.NullString `db:"destination_path" json:"destinationPath"`
+	ResultContract      sql.NullString `db:"result_contract" json:"resultContract"`
+	NotificationRuleSet sql.NullString `db:"notification_rule_set" json:"notificationRuleSet"`
+	DefaultDestinations pq.StringArray `db:"default_destinations" json:"defaultDestinations"`
+	TimeoutSeconds      sql.NullInt32  `db:"timeout_seconds" json:"timeoutSeconds"`
+	Status              TaskStatus     `db:"status" json:"status"`
+	ScheduleType        sql.NullString `db:"schedule_type" json:"scheduleType"`
+	CronExpression      sql.NullString `db:"cron_expression" json:"cronExpression"`
+	PrerequisiteTaskID  uuid.NullUUID  `db:"prerequisite_task_id" json:"prerequisiteTaskId"`
+	ScheduledAt         sql.NullTime   `db:"scheduled_at" json:"scheduledAt"`
+	StartedAt           sql.NullTime   `db:"started_at" json:"startedAt"`
+	CompletedAt         sql.NullTime   `db:"completed_at" json:"completedAt"`
+	CreatedBy           sql.NullString `db:"created_by" json:"createdBy"`
+	CreatedAt           time.Time      `db:"created_at" json:"createdAt"`
+	UpdatedAt           time.Time      `db:"updated_at" json:"updatedAt"`
 }
 
 type TaskResultStatus string
@@ -125,4 +128,63 @@ type AgentMetric struct {
 	RAMUsage  float32   `db:"ram_usage"`
 	DiskUsage []byte    `db:"disk_usage"` // JSONB stored as raw bytes
 	CreatedAt time.Time `db:"created_at"`
+}
+
+type NotificationEventStatus string
+
+const (
+	NotificationEventStatusDetected   NotificationEventStatus = "detected"
+	NotificationEventStatusSuppressed NotificationEventStatus = "suppressed"
+	NotificationEventStatusAccepted   NotificationEventStatus = "accepted"
+	NotificationEventStatusRejected   NotificationEventStatus = "rejected"
+)
+
+type NotificationDeliveryStatus string
+
+const (
+	NotificationDeliveryStatusPending        NotificationDeliveryStatus = "pending"
+	NotificationDeliveryStatusSent           NotificationDeliveryStatus = "sent"
+	NotificationDeliveryStatusFailed         NotificationDeliveryStatus = "failed"
+	NotificationDeliveryStatusRetryScheduled NotificationDeliveryStatus = "retry_scheduled"
+	NotificationDeliveryStatusDeadLetter     NotificationDeliveryStatus = "dead_letter"
+	NotificationDeliveryStatusCancelled      NotificationDeliveryStatus = "cancelled"
+)
+
+// NotificationEvent corresponds to the 'notification_events' table.
+type NotificationEvent struct {
+	ID                 uuid.UUID               `db:"id"`
+	TaskID             uuid.UUID               `db:"task_id"`
+	AgentID            uuid.UUID               `db:"agent_id"`
+	PrerequisiteTaskID uuid.NullUUID           `db:"prerequisite_task_id"`
+	EventType          string                  `db:"event_type"`
+	Severity           string                  `db:"severity"`
+	Title              string                  `db:"title"`
+	Summary            string                  `db:"summary"`
+	SourceKind         string                  `db:"source_kind"`
+	SourcePath         sql.NullString          `db:"source_path"`
+	SourceRef          sql.NullString          `db:"source_ref"`
+	PayloadJSON        []byte                  `db:"payload_json"`
+	DedupKey           sql.NullString          `db:"dedup_key"`
+	DedupWindowSeconds sql.NullInt32           `db:"dedup_window_seconds"`
+	Status             NotificationEventStatus `db:"status"`
+	CreatedAt          time.Time               `db:"created_at"`
+}
+
+// NotificationDelivery corresponds to the 'notification_deliveries' table.
+type NotificationDelivery struct {
+	ID                   uuid.UUID                  `db:"id"`
+	NotificationEventID  uuid.UUID                  `db:"notification_event_id"`
+	Channel              string                     `db:"channel"`
+	Destination          string                     `db:"destination"`
+	Status               NotificationDeliveryStatus `db:"status"`
+	Attempt              int32                      `db:"attempt"`
+	MaxAttempts          int32                      `db:"max_attempts"`
+	ProviderMessageID    sql.NullString             `db:"provider_message_id"`
+	ProviderResponseJSON []byte                     `db:"provider_response_json"`
+	ErrorMessage         sql.NullString             `db:"error_message"`
+	LastErrorCode        sql.NullString             `db:"last_error_code"`
+	ScheduledAt          time.Time                  `db:"scheduled_at"`
+	SentAt               sql.NullTime               `db:"sent_at"`
+	NextRetryAt          sql.NullTime               `db:"next_retry_at"`
+	CreatedAt            time.Time                  `db:"created_at"`
 }

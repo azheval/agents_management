@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,11 +125,12 @@ func handlePythonScriptTask(agentID string, taskClient pb.TaskServiceClient, age
 
 	stdoutPipe, _ := cmd.StdoutPipe()
 	stderrPipe, _ := cmd.StderrPipe()
+	var stdoutBuffer bytes.Buffer
 
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go pipeLogs(stdoutPipe, logStream, agentID, task.GetTaskId(), "INFO", &wg, taskLogger)
-	go pipeLogs(stderrPipe, logStream, agentID, task.GetTaskId(), "ERROR", &wg, taskLogger)
+	go pipeLogs(stdoutPipe, logStream, agentID, task.GetTaskId(), "INFO", &wg, taskLogger, &stdoutBuffer)
+	go pipeLogs(stderrPipe, logStream, agentID, task.GetTaskId(), "ERROR", &wg, taskLogger, nil)
 
 	err = cmd.Start()
 	if err != nil {
@@ -147,10 +149,10 @@ func handlePythonScriptTask(agentID string, taskClient pb.TaskServiceClient, age
 	// 5. Отправляем результат
 	exitCode := cmd.ProcessState.ExitCode()
 	finalStatus := pb.TaskStatus_SUCCESS
-	errMsg := ""
+	resultOutput := strings.TrimSpace(stdoutBuffer.String())
 
 	if err != nil {
-		errMsg = err.Error()
+		resultOutput = strings.TrimSpace(err.Error())
 		if ctx.Err() == context.DeadlineExceeded {
 			finalStatus = pb.TaskStatus_TIMED_OUT
 			taskLogger.Warn("Task timed out")
@@ -160,6 +162,6 @@ func handlePythonScriptTask(agentID string, taskClient pb.TaskServiceClient, age
 		}
 	}
 
-	submitResult(context.Background(), agentClient, agentID, task, finalStatus, exitCode, startTime, errMsg)
+	submitResult(context.Background(), agentClient, agentID, task, finalStatus, exitCode, startTime, resultOutput)
 	taskLogger.Info("Finished Python script task", "status", finalStatus, "exit_code", exitCode)
 }

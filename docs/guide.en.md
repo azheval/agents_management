@@ -94,6 +94,12 @@ Fill in the task description, path for saving the file by the agent, files trans
 
 Fill in the task description, specify the new agent version file. The checksum is calculated automatically.
 
+Any task can be configured with an 'Alert Pipeline' block that sends the 'stdout' stream to Telegram.
+
+![img_010.png](/docs/img/img_010.png)
+
+![img_011.png](/docs/img/img_011.png)
+
 Select the required task execution schedule, specify the timeout for command execution:
 
 - Immediate. The task executes immediately.
@@ -114,3 +120,7 @@ Select the required task execution schedule, specify the timeout for command exe
 When filling in the `config.json` file section ```telegram {}``` a notification about task completion will be received
 
 ![img_009.png](/docs/img/img_009.png)
+
+## Notifications Alert Pipeline
+
+![img_012.png](/docs/img/img_012.png)

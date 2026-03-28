@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - Notifications</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+    <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900">Agent Management</h1>
+            <div>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
+                <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+                <a href="/notifications" class="px-3 py-2 rounded-md text-sm font-medium text-white bg-blue-600">Notifications</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-800">Notification Events</h2>
+                    <p class="text-sm text-gray-500 mt-1">Recent events and delivery outcomes across the alert pipeline.</p>
+                </div>
+            </div>
+
+            <div class="bg-white shadow-md rounded-lg overflow-hidden">
+                <table class="min-w-full leading-normal">
+                    <thead>
+                        <tr>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Created</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Event</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Severity</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Task</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Agent</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Events}}
+                        <tr class="hover:bg-gray-50">
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">
+                                <div class="font-semibold text-gray-900">{{.Title}}</div>
+                                <div class="text-gray-500 text-xs">{{.EventType}}</div>
+                            </td>
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">
+                                <span class="px-2 py-1 rounded bg-gray-100 font-semibold">{{.Severity}}</span>
+                            </td>
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">
+                                <span class="px-2 py-1 rounded bg-gray-100 font-semibold">{{.Status}}</span>
+                            </td>
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">
+                                <a href="/task/view?id={{.TaskID}}" class="text-blue-600 hover:underline">
+                                    {{with index $.TaskDescriptions .TaskID}}{{.}}{{else}}<span class="font-mono">{{.TaskID}}</span>{{end}}
+                                </a>
+                            </td>
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">
+                                {{with index $.AgentNames .AgentID}}{{.}}{{else}}<span class="font-mono">{{.AgentID}}</span>{{end}}
+                            </td>
+                            <td class="px-5 py-4 border-b border-gray-200 text-sm">
+                                <a href="/notifications/{{.ID}}" class="text-indigo-600 hover:text-indigo-900">View</a>
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                            <td colspan="7" class="text-center py-10 text-gray-500">No notification events found.</td>
+                        </tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>

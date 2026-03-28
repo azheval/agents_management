@@ -31,11 +31,14 @@ import (
 type Server struct {
 	api.UnimplementedAgentServiceServer
 	api.UnimplementedTaskServiceServer
-	logger    *slog.Logger
-	storage   *storage.Storage
-	notifier  *notifier.MultiNotifier
-	taskQueue chan<- uuid.UUID
-	broker    *events.EventBroker
+	logger                         *slog.Logger
+	storage                        *storage.Storage
+	notifier                       *notifier.MultiNotifier
+	taskQueue                      chan<- uuid.UUID
+	broker                         *events.EventBroker
+	notificationRuleEngine         *NotificationRuleEngine
+	notificationRouter             *NotificationRouter
+	notificationDeliveryDispatcher *NotificationDeliveryDispatcher
 }
 
 func NewServer(logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan<- uuid.UUID, broker *events.EventBroker) *Server {
@@ -46,6 +49,15 @@ func NewServer(logger *slog.Logger, storage *storage.Storage, notifier *notifier
 		taskQueue: taskQueue,
 		broker:    broker,
 	}
+}
+
+func (s *Server) SetNotificationPipeline(ruleEngine *NotificationRuleEngine, router *NotificationRouter) {
+	s.notificationRuleEngine = ruleEngine
+	s.notificationRouter = router
+}
+
+func (s *Server) SetNotificationDeliveryDispatcher(dispatcher *NotificationDeliveryDispatcher) {
+	s.notificationDeliveryDispatcher = dispatcher
 }
 
 func (s *Server) RegisterAgent(ctx context.Context, in *api.RegisterAgentRequest) (*api.RegisterAgentResponse, error) {
@@ -233,6 +245,8 @@ func (s *Server) SubmitTaskResult(ctx context.Context, in *api.SubmitTaskResultR
 		s.logger.Error("Failed to update final task status", "task_id", taskID, "error", err)
 		return &api.SubmitTaskResultResponse{Success: false, Message: "Failed to update final task status"}, nil
 	}
+
+	s.evaluateAndStoreNotificationEvent(ctx, task, result)
 
 	updatedTask, err := s.storage.Task.GetTaskByID(ctx, taskID)
 	if err != nil {
@@ -615,7 +629,7 @@ func (s *Server) AssignTasks(stream api.TaskService_AssignTasksServer) error {
 	}
 }
 
-func StartServer(cfg config.ServerConfig, logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan<- uuid.UUID, broker *events.EventBroker) {
+func StartServer(cfg config.ServerConfig, logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan<- uuid.UUID, broker *events.EventBroker, ruleEngine *NotificationRuleEngine, router *NotificationRouter, dispatcher *NotificationDeliveryDispatcher) {
 	lis, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
 		logger.Error("failed to listen", "address", cfg.ListenAddress, "error", err)
@@ -623,6 +637,8 @@ func StartServer(cfg config.ServerConfig, logger *slog.Logger, storage *storage.
 	}
 	s := grpc.NewServer()
 	server := NewServer(logger, storage, notifier, taskQueue, broker)
+	server.SetNotificationPipeline(ruleEngine, router)
+	server.SetNotificationDeliveryDispatcher(dispatcher)
 	api.RegisterAgentServiceServer(s, server)
 	api.RegisterTaskServiceServer(s, server)
 	logger.Info("server listening", "address", lis.Addr())

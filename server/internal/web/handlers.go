@@ -3,6 +3,7 @@ package web
 import (
 	"agent-management/server/internal/events"
 	"agent-management/server/internal/notifier"
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -23,9 +24,10 @@ import (
 )
 
 type TaskDetailPageData struct {
-	Task   *storage.Task
-	Result *storage.TaskResult
-	Logs   []*storage.Log
+	Task               *storage.Task
+	Result             *storage.TaskResult
+	Logs               []*storage.Log
+	NotificationEvents []*storage.NotificationEvent
 }
 
 type NewTaskPageData struct {
@@ -47,6 +49,18 @@ type TasksPageData struct {
 	Tasks      []*storage.Task
 	AgentID    string
 	AgentNames map[uuid.UUID]string
+}
+
+type NotificationEventsPageData struct {
+	Events           []*storage.NotificationEvent
+	TaskDescriptions map[uuid.UUID]string
+	AgentNames       map[uuid.UUID]string
+}
+
+type NotificationEventDetailPageData struct {
+	Event         *storage.NotificationEvent
+	Deliveries    []*storage.NotificationDelivery
+	PayloadPretty string
 }
 
 // AgentResponse defines the structure for a single agent in the JSON API response.
@@ -200,11 +214,145 @@ func (h *Handlers) viewTask(w http.ResponseWriter, r *http.Request) {
 	}
 	result, _ := h.storage.Task.GetTaskResultByTaskID(r.Context(), taskID)
 	logs, _ := h.storage.Log.GetLogsByTaskID(r.Context(), taskID)
-	pageData := TaskDetailPageData{Task: task, Result: result, Logs: logs}
+	var notificationEvents []*storage.NotificationEvent
+	if h.storage.Notification != nil {
+		notificationEvents, _ = h.storage.Notification.ListNotificationEventsByTaskID(r.Context(), taskID)
+	}
+	pageData := TaskDetailPageData{Task: task, Result: result, Logs: logs, NotificationEvents: notificationEvents}
 	err = h.templates.ExecuteTemplate(w, "task.html", pageData)
 	if err != nil {
 		h.logger.Error("Failed to execute task template", "error", err)
 	}
+}
+
+func (h *Handlers) listNotificationEvents(w http.ResponseWriter, r *http.Request) {
+	if h.storage.Notification == nil {
+		http.Error(w, "Notification storage is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	events, err := h.storage.Notification.ListNotificationEvents(r.Context(), 100)
+	if err != nil {
+		h.logger.Error("Failed to list notification events", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	agents, err := h.storage.Agent.ListAgents(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list agents for notification page", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	agentNames := make(map[uuid.UUID]string, len(agents))
+	for _, agent := range agents {
+		agentNames[agent.ID] = agent.Hostname
+	}
+
+	taskDescriptions := make(map[uuid.UUID]string, len(events))
+	for _, event := range events {
+		task, taskErr := h.storage.Task.GetTaskByID(r.Context(), event.TaskID)
+		if taskErr != nil {
+			continue
+		}
+		if task.Description.Valid && task.Description.String != "" {
+			taskDescriptions[event.TaskID] = task.Description.String
+			continue
+		}
+		taskDescriptions[event.TaskID] = string(task.TaskType)
+	}
+
+	pageData := NotificationEventsPageData{
+		Events:           events,
+		TaskDescriptions: taskDescriptions,
+		AgentNames:       agentNames,
+	}
+	err = h.templates.ExecuteTemplate(w, "notifications.html", pageData)
+	if err != nil {
+		h.logger.Error("Failed to execute notifications template", "error", err)
+	}
+}
+
+func (h *Handlers) viewNotificationEvent(w http.ResponseWriter, r *http.Request) {
+	if h.storage.Notification == nil {
+		http.Error(w, "Notification storage is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	eventID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid notification event ID", http.StatusBadRequest)
+		return
+	}
+
+	event, err := h.storage.Notification.GetNotificationEventByID(r.Context(), eventID)
+	if err != nil {
+		http.Error(w, "Notification event not found", http.StatusNotFound)
+		return
+	}
+
+	deliveries, err := h.storage.Notification.ListNotificationDeliveriesByEventID(r.Context(), eventID)
+	if err != nil {
+		h.logger.Error("Failed to list notification deliveries", "event_id", eventID, "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	payloadPretty := string(event.PayloadJSON)
+	if len(event.PayloadJSON) > 0 {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, event.PayloadJSON, "", "  "); err == nil {
+			payloadPretty = pretty.String()
+		}
+	}
+
+	pageData := NotificationEventDetailPageData{
+		Event:         event,
+		Deliveries:    deliveries,
+		PayloadPretty: payloadPretty,
+	}
+	err = h.templates.ExecuteTemplate(w, "notification_event.html", pageData)
+	if err != nil {
+		h.logger.Error("Failed to execute notification_event template", "error", err)
+	}
+}
+
+func (h *Handlers) retryNotificationDelivery(w http.ResponseWriter, r *http.Request) {
+	if h.storage.Notification == nil {
+		http.Error(w, "Notification storage is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	deliveryID, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		http.Error(w, "Invalid notification delivery ID", http.StatusBadRequest)
+		return
+	}
+
+	delivery, err := h.storage.Notification.GetNotificationDeliveryByID(r.Context(), deliveryID)
+	if err != nil {
+		http.Error(w, "Notification delivery not found", http.StatusNotFound)
+		return
+	}
+	if delivery.Status != storage.NotificationDeliveryStatusDeadLetter &&
+		delivery.Status != storage.NotificationDeliveryStatusFailed &&
+		delivery.Status != storage.NotificationDeliveryStatusCancelled {
+		http.Error(w, "Notification delivery is not eligible for manual retry", http.StatusBadRequest)
+		return
+	}
+
+	maxAttempts := delivery.MaxAttempts
+	if delivery.Attempt >= maxAttempts {
+		maxAttempts = delivery.Attempt + 1
+	}
+	if err := h.storage.Notification.ScheduleNotificationDeliveryRetry(r.Context(), delivery.ID, maxAttempts, time.Now()); err != nil {
+		h.logger.Error("Failed to schedule manual notification retry", "delivery_id", delivery.ID, "error", err)
+		http.Error(w, "Failed to schedule retry", http.StatusInternalServerError)
+		return
+	}
+
+	http.Redirect(w, r, "/notifications/"+delivery.NotificationEventID.String(), http.StatusSeeOther)
 }
 
 func (h *Handlers) handleNewTask(w http.ResponseWriter, r *http.Request) {
@@ -412,18 +560,32 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 		}
 
 		task := storage.Task{
-			ID:                 uuid.New(),
-			AgentID:            agentID,
-			Description:        sql.NullString{String: r.FormValue("description"), Valid: r.FormValue("description") != ""},
-			TaskType:           taskType,
-			Status:             storage.TaskStatusPending,
-			TimeoutSeconds:     sql.NullInt32{Int32: int32(timeout), Valid: true},
-			ScheduleType:       sql.NullString{String: scheduleType, Valid: scheduleType != "" && scheduleType != "IMMEDIATE"},
-			ScheduledAt:        scheduledAt,
-			CronExpression:     cronExpression,
-			PrerequisiteTaskID: prerequisiteTaskID,
-			CreatedAt:          time.Now(),
-			UpdatedAt:          time.Now(),
+			ID:                  uuid.New(),
+			AgentID:             agentID,
+			Description:         sql.NullString{String: r.FormValue("description"), Valid: r.FormValue("description") != ""},
+			TaskType:            taskType,
+			ResultContract:      sql.NullString{String: r.FormValue("result_contract"), Valid: r.FormValue("result_contract") != ""},
+			NotificationRuleSet: sql.NullString{String: r.FormValue("notification_rule_set"), Valid: r.FormValue("notification_rule_set") != ""},
+			Status:              storage.TaskStatusPending,
+			TimeoutSeconds:      sql.NullInt32{Int32: int32(timeout), Valid: true},
+			ScheduleType:        sql.NullString{String: scheduleType, Valid: scheduleType != "" && scheduleType != "IMMEDIATE"},
+			ScheduledAt:         scheduledAt,
+			CronExpression:      cronExpression,
+			PrerequisiteTaskID:  prerequisiteTaskID,
+			CreatedAt:           time.Now(),
+			UpdatedAt:           time.Now(),
+		}
+		rawDestinations := strings.Split(strings.TrimSpace(r.FormValue("default_destinations")), ",")
+		defaultDestinations := make([]string, 0, len(rawDestinations))
+		for _, destination := range rawDestinations {
+			trimmed := strings.TrimSpace(destination)
+			if trimmed == "" {
+				continue
+			}
+			defaultDestinations = append(defaultDestinations, trimmed)
+		}
+		if len(defaultDestinations) > 0 {
+			task.DefaultDestinations = pq.StringArray(defaultDestinations)
 		}
 
 		// --- Handle File Uploads ---

@@ -96,14 +96,14 @@ func (r *PostgresTaskRepository) CreateTask(ctx context.Context, task *Task) err
 	query := `
 		INSERT INTO tasks (
 			id, agent_id, description, task_type, command, args, entrypoint_script, package_files, 
-			source_path, destination_path, timeout_seconds, status, 
+			source_path, destination_path, result_contract, notification_rule_set, default_destinations, timeout_seconds, status, 
 			schedule_type, cron_expression, prerequisite_task_id, scheduled_at, created_by
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
 	`
 	_, err := r.db.ExecContext(ctx, query,
 		task.ID, task.AgentID, task.Description, task.TaskType, task.Command, task.Args, task.EntrypointScript,
-		task.PackageFiles, task.SourcePath, task.DestinationPath, task.TimeoutSeconds, task.Status,
+		task.PackageFiles, task.SourcePath, task.DestinationPath, task.ResultContract, task.NotificationRuleSet, task.DefaultDestinations, task.TimeoutSeconds, task.Status,
 		task.ScheduleType, task.CronExpression, task.PrerequisiteTaskID, task.ScheduledAt, task.CreatedBy,
 	)
 	return err
@@ -308,4 +308,159 @@ func (r *PostgresMetricRepository) GetMetricsByAgentID(ctx context.Context, agen
 	`
 	err := r.db.SelectContext(ctx, &metrics, query, agentID, since)
 	return metrics, err
+}
+
+// PostgresNotificationRepository is the PostgreSQL implementation of the NotificationRepository.
+type PostgresNotificationRepository struct {
+	db *sqlx.DB
+}
+
+// NewPostgresNotificationRepository creates a new repository for notifications.
+func NewPostgresNotificationRepository(db *sqlx.DB) *PostgresNotificationRepository {
+	return &PostgresNotificationRepository{db: db}
+}
+
+func (r *PostgresNotificationRepository) CreateNotificationEvent(ctx context.Context, event *NotificationEvent) error {
+	query := `
+		INSERT INTO notification_events (
+			id, task_id, agent_id, prerequisite_task_id, event_type, severity, title, summary,
+			source_kind, source_path, source_ref, payload_json, dedup_key, dedup_window_seconds, status
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		event.ID, event.TaskID, event.AgentID, event.PrerequisiteTaskID, event.EventType, event.Severity,
+		event.Title, event.Summary, event.SourceKind, event.SourcePath, event.SourceRef, event.PayloadJSON,
+		event.DedupKey, event.DedupWindowSeconds, event.Status,
+	)
+	return err
+}
+
+func (r *PostgresNotificationRepository) UpdateNotificationEventStatus(ctx context.Context, id uuid.UUID, status NotificationEventStatus) error {
+	query := `
+		UPDATE notification_events
+		SET status = $1
+		WHERE id = $2
+	`
+	_, err := r.db.ExecContext(ctx, query, status, id)
+	return err
+}
+
+func (r *PostgresNotificationRepository) GetNotificationEventByID(ctx context.Context, id uuid.UUID) (*NotificationEvent, error) {
+	var event NotificationEvent
+	query := "SELECT * FROM notification_events WHERE id = $1"
+	err := r.db.GetContext(ctx, &event, query, id)
+	return &event, err
+}
+
+func (r *PostgresNotificationRepository) FindLatestNotificationEventByDedupKeySince(ctx context.Context, dedupKey string, since time.Time, excludeID uuid.UUID) (*NotificationEvent, error) {
+	var event NotificationEvent
+	query := `
+		SELECT *
+		FROM notification_events
+		WHERE dedup_key = $1
+		  AND created_at >= $2
+		  AND id <> $3
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	err := r.db.GetContext(ctx, &event, query, dedupKey, since, excludeID)
+	if err != nil {
+		return nil, err
+	}
+	return &event, nil
+}
+
+func (r *PostgresNotificationRepository) ListNotificationEvents(ctx context.Context, limit int) ([]*NotificationEvent, error) {
+	var events []*NotificationEvent
+	query := "SELECT * FROM notification_events ORDER BY created_at DESC LIMIT $1"
+	err := r.db.SelectContext(ctx, &events, query, limit)
+	return events, err
+}
+
+func (r *PostgresNotificationRepository) ListNotificationEventsByTaskID(ctx context.Context, taskID uuid.UUID) ([]*NotificationEvent, error) {
+	var events []*NotificationEvent
+	query := "SELECT * FROM notification_events WHERE task_id = $1 ORDER BY created_at DESC"
+	err := r.db.SelectContext(ctx, &events, query, taskID)
+	return events, err
+}
+
+func (r *PostgresNotificationRepository) CreateNotificationDelivery(ctx context.Context, delivery *NotificationDelivery) error {
+	query := `
+		INSERT INTO notification_deliveries (
+			id, notification_event_id, channel, destination, status, attempt, max_attempts,
+			provider_message_id, provider_response_json, error_message, last_error_code,
+			scheduled_at, sent_at, next_retry_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		delivery.ID, delivery.NotificationEventID, delivery.Channel, delivery.Destination, delivery.Status,
+		delivery.Attempt, delivery.MaxAttempts, delivery.ProviderMessageID, delivery.ProviderResponseJSON,
+		delivery.ErrorMessage, delivery.LastErrorCode, delivery.ScheduledAt, delivery.SentAt, delivery.NextRetryAt,
+	)
+	return err
+}
+
+func (r *PostgresNotificationRepository) UpdateNotificationDeliveryStatus(ctx context.Context, id uuid.UUID, attempt int32, status NotificationDeliveryStatus, providerMessageID sql.NullString, providerResponseJSON []byte, errorMessage sql.NullString, lastErrorCode sql.NullString, sentAt sql.NullTime, nextRetryAt sql.NullTime) error {
+	query := `
+		UPDATE notification_deliveries
+		SET attempt = $1,
+			status = $2,
+			provider_message_id = $3,
+			provider_response_json = $4,
+			error_message = $5,
+			last_error_code = $6,
+			sent_at = $7,
+			next_retry_at = $8
+		WHERE id = $9
+	`
+	_, err := r.db.ExecContext(ctx, query, attempt, status, providerMessageID, providerResponseJSON, errorMessage, lastErrorCode, sentAt, nextRetryAt, id)
+	return err
+}
+
+func (r *PostgresNotificationRepository) GetNotificationDeliveryByID(ctx context.Context, id uuid.UUID) (*NotificationDelivery, error) {
+	var delivery NotificationDelivery
+	query := "SELECT * FROM notification_deliveries WHERE id = $1"
+	err := r.db.GetContext(ctx, &delivery, query, id)
+	return &delivery, err
+}
+
+func (r *PostgresNotificationRepository) ListNotificationDeliveriesByEventID(ctx context.Context, eventID uuid.UUID) ([]*NotificationDelivery, error) {
+	var deliveries []*NotificationDelivery
+	query := "SELECT * FROM notification_deliveries WHERE notification_event_id = $1 ORDER BY created_at ASC"
+	err := r.db.SelectContext(ctx, &deliveries, query, eventID)
+	return deliveries, err
+}
+
+func (r *PostgresNotificationRepository) ListNotificationDeliveriesForDispatch(ctx context.Context, now time.Time, limit int) ([]*NotificationDelivery, error) {
+	var deliveries []*NotificationDelivery
+	query := `
+		SELECT *
+		FROM notification_deliveries
+		WHERE
+			(status = 'pending' AND scheduled_at <= $1)
+			OR
+			(status = 'retry_scheduled' AND next_retry_at IS NOT NULL AND next_retry_at <= $1)
+		ORDER BY created_at ASC
+		LIMIT $2
+	`
+	err := r.db.SelectContext(ctx, &deliveries, query, now, limit)
+	return deliveries, err
+}
+
+func (r *PostgresNotificationRepository) ScheduleNotificationDeliveryRetry(ctx context.Context, id uuid.UUID, maxAttempts int32, nextRetryAt time.Time) error {
+	query := `
+		UPDATE notification_deliveries
+		SET status = 'retry_scheduled',
+			max_attempts = $1,
+			next_retry_at = $2,
+			error_message = NULL,
+			last_error_code = NULL,
+			provider_response_json = NULL,
+			sent_at = NULL
+		WHERE id = $3
+	`
+	_, err := r.db.ExecContext(ctx, query, maxAttempts, nextRetryAt, id)
+	return err
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"agent-management/server/internal"
 	"agent-management/server/internal/config"
@@ -54,7 +56,8 @@ func main() {
 	taskRepo := storage.NewPostgresTaskRepository(db)
 	logRepo := storage.NewPostgresLogRepository(db)
 	metricRepo := storage.NewPostgresMetricRepository(db)
-	appStorage := storage.NewStorage(agentRepo, taskRepo, logRepo, metricRepo)
+	notificationRepo := storage.NewPostgresNotificationRepository(db)
+	appStorage := storage.NewStorage(agentRepo, taskRepo, logRepo, metricRepo, notificationRepo)
 
 	// Create and start the agent status service
 	statusLogger := appLogger.With("service", "AgentStatusService")
@@ -66,8 +69,9 @@ func main() {
 	notifiers := []notifier.Notifier{
 		notifier.NewLogNotifier(notifierLogger),
 	}
+	var telegramNotifier *notifier.TelegramNotifier
 	if cfg.Telegram.BotToken != "" && cfg.Telegram.ChatID != 0 {
-		telegramNotifier, err := notifier.NewTelegramNotifier(cfg.Telegram.BotToken, cfg.Telegram.ChatID, notifierLogger)
+		telegramNotifier, err = notifier.NewTelegramNotifier(cfg.Telegram.BotToken, cfg.Telegram.ChatID, notifierLogger)
 		if err != nil {
 			appLogger.Error("failed to initialize telegram notifier", "error", err)
 		} else {
@@ -76,6 +80,20 @@ func main() {
 		}
 	}
 	multiNotifier := notifier.NewMultiNotifier(notifierLogger, notifiers...)
+
+	notificationRuleEngine := internal.NewNotificationRuleEngine(internal.NewDefaultNotificationPolicy())
+	notificationRoutes := make([]internal.NotificationRoute, 0, 1)
+	deliveryAdapters := make([]internal.NotificationDeliveryAdapter, 0, 1)
+	if telegramNotifier != nil {
+		notificationRoutes = append(notificationRoutes, internal.NotificationRoute{
+			Channel:     "telegram",
+			Destination: fmt.Sprintf("%d", cfg.Telegram.ChatID),
+			MaxAttempts: 3,
+		})
+		deliveryAdapters = append(deliveryAdapters, telegramNotifier)
+	}
+	notificationRouter := internal.NewNotificationRouter(notificationRoutes...)
+	notificationDispatcher := internal.NewNotificationDeliveryDispatcher(notifierLogger, deliveryAdapters...)
 
 	// Create the task queue and scheduler
 	taskQueue := make(chan uuid.UUID, 100)
@@ -87,11 +105,23 @@ func main() {
 	}
 	defer taskScheduler.Stop()
 
-
 	// Start the Web server
 	eventBroker := web.StartWebServer(cfg.Webserver, appLogger, appStorage, multiNotifier)
 	defer eventBroker.Stop()
 
+	serverInstance := internal.NewServer(appLogger, appStorage, multiNotifier, taskQueue, eventBroker)
+	serverInstance.SetNotificationPipeline(notificationRuleEngine, notificationRouter)
+	serverInstance.SetNotificationDeliveryDispatcher(notificationDispatcher)
+
+	retryProcessor := internal.NewNotificationRetryProcessor(
+		appLogger.With("service", "NotificationRetryProcessor"),
+		appStorage,
+		serverInstance,
+		30*time.Second,
+		50,
+	)
+	go retryProcessor.Start(context.Background())
+
 	// Start the gRPC server (this will block)
-	internal.StartServer(cfg.Server, appLogger, appStorage, multiNotifier, taskQueue, eventBroker)
+	internal.StartServer(cfg.Server, appLogger, appStorage, multiNotifier, taskQueue, eventBroker, notificationRuleEngine, notificationRouter, notificationDispatcher)
 }

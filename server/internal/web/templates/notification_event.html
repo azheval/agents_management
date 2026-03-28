@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Management - Notification Event</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100">
+
+    <header class="bg-white shadow-sm">
+        <nav class="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-900">Agent Management</h1>
+            <div>
+                <a href="/" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Agents</a>
+                <a href="/tasks" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Tasks</a>
+                <a href="/notifications" class="px-3 py-2 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-200">Notifications</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <div class="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-800">Notification Event</h2>
+                    <p class="text-sm text-gray-500 mt-1">Event metadata, raw payload, and delivery history.</p>
+                </div>
+                <a href="/notifications" class="px-4 py-2 text-sm text-blue-600 bg-blue-100 hover:bg-blue-200 rounded-md">Back to Notifications</a>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Event Summary</h3>
+                {{with .Event}}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                    <div><strong class="text-gray-600">Event ID:</strong> <span class="font-mono">{{.ID}}</span></div>
+                    <div><strong class="text-gray-600">Status:</strong> <span class="font-semibold">{{.Status}}</span></div>
+                    <div><strong class="text-gray-600">Type:</strong> <span>{{.EventType}}</span></div>
+                    <div><strong class="text-gray-600">Severity:</strong> <span>{{.Severity}}</span></div>
+                    <div><strong class="text-gray-600">Title:</strong> <span>{{.Title}}</span></div>
+                    <div><strong class="text-gray-600">Created At:</strong> <span>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span></div>
+                    <div class="col-span-full"><strong class="text-gray-600">Summary:</strong> <span>{{.Summary}}</span></div>
+                    <div><strong class="text-gray-600">Task:</strong> <a class="text-blue-600 hover:underline font-mono" href="/task/view?id={{.TaskID}}">{{.TaskID}}</a></div>
+                    <div><strong class="text-gray-600">Agent:</strong> <span class="font-mono">{{.AgentID}}</span></div>
+                    <div><strong class="text-gray-600">Source Kind:</strong> <span>{{.SourceKind}}</span></div>
+                    <div><strong class="text-gray-600">Source Path:</strong> <span>{{if .SourcePath.Valid}}{{.SourcePath.String}}{{else}}N/A{{end}}</span></div>
+                    <div class="col-span-full"><strong class="text-gray-600">Dedup Key:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if .DedupKey.Valid}}{{.DedupKey.String}}{{else}}N/A{{end}}</code></div>
+                </div>
+                {{end}}
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Deliveries</h3>
+                <div class="space-y-4">
+                    {{range .Deliveries}}
+                    <div class="border rounded-lg p-4">
+                        <div class="flex items-start justify-between gap-4">
+                            <div class="text-sm space-y-1">
+                                <div><strong class="text-gray-600">Delivery ID:</strong> <span class="font-mono">{{.ID}}</span></div>
+                                <div><strong class="text-gray-600">Channel:</strong> {{.Channel}}</div>
+                                <div><strong class="text-gray-600">Destination:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{.Destination}}</code></div>
+                                <div><strong class="text-gray-600">Status:</strong> <span class="font-semibold">{{.Status}}</span></div>
+                                <div><strong class="text-gray-600">Attempt:</strong> {{.Attempt}} / {{.MaxAttempts}}</div>
+                                <div><strong class="text-gray-600">Scheduled:</strong> {{.ScheduledAt.Format "2006-01-02 15:04:05"}}</div>
+                                <div><strong class="text-gray-600">Sent At:</strong> {{if .SentAt.Valid}}{{.SentAt.Time.Format "2006-01-02 15:04:05"}}{{else}}N/A{{end}}</div>
+                                <div><strong class="text-gray-600">Next Retry:</strong> {{if .NextRetryAt.Valid}}{{.NextRetryAt.Time.Format "2006-01-02 15:04:05"}}{{else}}N/A{{end}}</div>
+                                <div><strong class="text-gray-600">Last Error:</strong> {{if .ErrorMessage.Valid}}{{.ErrorMessage.String}}{{else}}N/A{{end}}</div>
+                            </div>
+                            <div>
+                                {{if or (eq .Status "dead_letter") (eq .Status "failed") (eq .Status "cancelled")}}
+                                <form method="POST" action="/notifications/deliveries/{{.ID}}/retry">
+                                    <button type="submit" class="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md">Retry Now</button>
+                                </form>
+                                {{end}}
+                            </div>
+                        </div>
+                    </div>
+                    {{else}}
+                    <p class="text-center text-gray-500 py-4">No deliveries found for this event.</p>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <h3 class="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Payload</h3>
+                <pre class="bg-gray-900 text-white text-sm p-4 rounded-md w-full overflow-x-auto">{{.PayloadPretty}}</pre>
+            </div>
+        </div>
+    </main>
+
+</body>
+</html>

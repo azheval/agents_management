@@ -49,20 +49,38 @@ type MetricRepository interface {
 	GetMetricsByAgentID(ctx context.Context, agentID uuid.UUID, since time.Time) ([]*AgentMetric, error)
 }
 
+// NotificationRepository defines the interface for interacting with notification storage.
+type NotificationRepository interface {
+	CreateNotificationEvent(ctx context.Context, event *NotificationEvent) error
+	UpdateNotificationEventStatus(ctx context.Context, id uuid.UUID, status NotificationEventStatus) error
+	GetNotificationEventByID(ctx context.Context, id uuid.UUID) (*NotificationEvent, error)
+	FindLatestNotificationEventByDedupKeySince(ctx context.Context, dedupKey string, since time.Time, excludeID uuid.UUID) (*NotificationEvent, error)
+	ListNotificationEvents(ctx context.Context, limit int) ([]*NotificationEvent, error)
+	ListNotificationEventsByTaskID(ctx context.Context, taskID uuid.UUID) ([]*NotificationEvent, error)
+	CreateNotificationDelivery(ctx context.Context, delivery *NotificationDelivery) error
+	UpdateNotificationDeliveryStatus(ctx context.Context, id uuid.UUID, attempt int32, status NotificationDeliveryStatus, providerMessageID sql.NullString, providerResponseJSON []byte, errorMessage sql.NullString, lastErrorCode sql.NullString, sentAt sql.NullTime, nextRetryAt sql.NullTime) error
+	GetNotificationDeliveryByID(ctx context.Context, id uuid.UUID) (*NotificationDelivery, error)
+	ListNotificationDeliveriesForDispatch(ctx context.Context, now time.Time, limit int) ([]*NotificationDelivery, error)
+	ListNotificationDeliveriesByEventID(ctx context.Context, eventID uuid.UUID) ([]*NotificationDelivery, error)
+	ScheduleNotificationDeliveryRetry(ctx context.Context, id uuid.UUID, maxAttempts int32, nextRetryAt time.Time) error
+}
+
 // Storage is a container for all repositories.
 type Storage struct {
-	Agent  AgentRepository
-	Task   TaskRepository
-	Log    LogRepository
-	Metric MetricRepository
+	Agent        AgentRepository
+	Task         TaskRepository
+	Log          LogRepository
+	Metric       MetricRepository
+	Notification NotificationRepository
 }
 
 // NewStorage creates a new storage container.
-func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogRepository, metricRepo MetricRepository) *Storage {
+func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogRepository, metricRepo MetricRepository, notificationRepo NotificationRepository) *Storage {
 	return &Storage{
-		Agent:  agentRepo,
-		Task:   taskRepo,
-		Log:    logRepo,
-		Metric: metricRepo,
+		Agent:        agentRepo,
+		Task:         taskRepo,
+		Log:          logRepo,
+		Metric:       metricRepo,
+		Notification: notificationRepo,
 	}
 }

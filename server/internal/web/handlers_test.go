@@ -25,18 +25,20 @@ import (
 )
 
 // setupTestHandlers is a helper function to create all mocks and handlers for testing.
-func setupTestHandlers(t *testing.T) (*Handlers, *mocks.MockAgentRepository, *mocks.MockTaskRepository, *mocks.MockLogRepository, *mocks.MockMetricRepository, *events.EventBroker) {
+func setupTestHandlers(t *testing.T) (*Handlers, *mocks.MockAgentRepository, *mocks.MockTaskRepository, *mocks.MockLogRepository, *mocks.MockMetricRepository, *mocks.MockNotificationRepository, *events.EventBroker) {
 	ctrl := gomock.NewController(t)
 	mockAgentRepo := mocks.NewMockAgentRepository(ctrl)
 	mockTaskRepo := mocks.NewMockTaskRepository(ctrl)
 	mockLogRepo := mocks.NewMockLogRepository(ctrl)
 	mockMetricRepo := mocks.NewMockMetricRepository(ctrl)
+	mockNotificationRepo := mocks.NewMockNotificationRepository(ctrl)
 
 	mockStorage := &storage.Storage{
-		Agent:  mockAgentRepo,
-		Task:   mockTaskRepo,
-		Log:    mockLogRepo,
-		Metric: mockMetricRepo,
+		Agent:        mockAgentRepo,
+		Task:         mockTaskRepo,
+		Log:          mockLogRepo,
+		Metric:       mockMetricRepo,
+		Notification: mockNotificationRepo,
 	}
 
 	var funcMap = template.FuncMap{
@@ -58,11 +60,11 @@ func setupTestHandlers(t *testing.T) (*Handlers, *mocks.MockAgentRepository, *mo
 	t.Cleanup(broker.Stop)
 
 	h := NewHandlers(logger, mockStorage, templates, multiNotifier, broker)
-	return h, mockAgentRepo, mockTaskRepo, mockLogRepo, mockMetricRepo, broker
+	return h, mockAgentRepo, mockTaskRepo, mockLogRepo, mockMetricRepo, mockNotificationRepo, broker
 }
 
 func TestListAgents(t *testing.T) {
-	h, mockAgentRepo, _, _, _, _ := setupTestHandlers(t)
+	h, mockAgentRepo, _, _, _, _, _ := setupTestHandlers(t)
 
 	t.Run("success", func(t *testing.T) {
 		agents := []*storage.Agent{{Hostname: "agent-1"}, {Hostname: "agent-2"}}
@@ -79,7 +81,7 @@ func TestListAgents(t *testing.T) {
 }
 
 func TestListTasks(t *testing.T) {
-	h, mockAgentRepo, mockTaskRepo, _, _, _ := setupTestHandlers(t)
+	h, mockAgentRepo, mockTaskRepo, _, _, _, _ := setupTestHandlers(t)
 
 	t.Run("success", func(t *testing.T) {
 		taskID := uuid.New()
@@ -105,7 +107,7 @@ func TestListTasks(t *testing.T) {
 }
 
 func TestViewTask(t *testing.T) {
-	h, _, mockTaskRepo, mockLogRepo, _, _ := setupTestHandlers(t)
+	h, _, mockTaskRepo, mockLogRepo, _, mockNotificationRepo, _ := setupTestHandlers(t)
 	taskID := uuid.New()
 
 	t.Run("success", func(t *testing.T) {
@@ -116,6 +118,7 @@ func TestViewTask(t *testing.T) {
 		mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(task, nil)
 		mockTaskRepo.EXPECT().GetTaskResultByTaskID(gomock.Any(), taskID).Return(result, nil)
 		mockLogRepo.EXPECT().GetLogsByTaskID(gomock.Any(), taskID).Return(logs, nil)
+		mockNotificationRepo.EXPECT().ListNotificationEventsByTaskID(gomock.Any(), taskID).Return(nil, nil)
 
 		req := httptest.NewRequest("GET", "/task/view?id="+taskID.String(), nil)
 		rr := httptest.NewRecorder()
@@ -128,7 +131,7 @@ func TestViewTask(t *testing.T) {
 }
 
 func TestCreateTask(t *testing.T) {
-	h, mockAgentRepo, mockTaskRepo, _, _, _ := setupTestHandlers(t)
+	h, mockAgentRepo, mockTaskRepo, _, _, _, _ := setupTestHandlers(t)
 	agentID := uuid.New()
 
 	// Helper to create multipart requests
@@ -150,10 +153,13 @@ func TestCreateTask(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		values := map[string]string{
-			"agent_id":    agentID.String(),
-			"task_type":   "EXEC_COMMAND",
-			"command":     "ls",
-			"description": "List files in home directory",
+			"agent_id":              agentID.String(),
+			"task_type":             "EXEC_COMMAND",
+			"command":               "ls",
+			"description":           "List files in home directory",
+			"result_contract":       "alert_payload.v1",
+			"notification_rule_set": "errors_only",
+			"default_destinations":  "telegram, telegram:123456",
 		}
 		req, err := createMultipartRequest(values)
 		if err != nil {
@@ -165,6 +171,15 @@ func TestCreateTask(t *testing.T) {
 			DoAndReturn(func(_ any, task *storage.Task) error {
 				if !task.Description.Valid || task.Description.String != "List files in home directory" {
 					t.Fatalf("expected task description to be saved, got %+v", task.Description)
+				}
+				if !task.ResultContract.Valid || task.ResultContract.String != "alert_payload.v1" {
+					t.Fatalf("expected result contract to be saved, got %+v", task.ResultContract)
+				}
+				if !task.NotificationRuleSet.Valid || task.NotificationRuleSet.String != "errors_only" {
+					t.Fatalf("expected notification rule set to be saved, got %+v", task.NotificationRuleSet)
+				}
+				if len(task.DefaultDestinations) != 2 || task.DefaultDestinations[1] != "telegram:123456" {
+					t.Fatalf("expected destinations to be saved, got %+v", task.DefaultDestinations)
 				}
 				return nil
 			})
@@ -220,7 +235,7 @@ func TestCreateTask(t *testing.T) {
 }
 
 func TestUpdateTaskSchedule(t *testing.T) {
-	h, _, mockTaskRepo, _, _, _ := setupTestHandlers(t)
+	h, _, mockTaskRepo, _, _, _, _ := setupTestHandlers(t)
 	taskID := uuid.New()
 	scheduledTime := time.Now().Add(2 * time.Hour).UTC()
 	form := url.Values{}
@@ -258,7 +273,7 @@ func TestUpdateTaskSchedule(t *testing.T) {
 }
 
 func TestEventsSSE(t *testing.T) {
-	h, _, _, _, _, broker := setupTestHandlers(t)
+	h, _, _, _, _, _, broker := setupTestHandlers(t)
 
 	req := httptest.NewRequest("GET", "/events", nil)
 	rr := httptest.NewRecorder()
@@ -280,5 +295,142 @@ func TestEventsSSE(t *testing.T) {
 	expectedEvent := `data: {"hello":"world"}`
 	if !strings.Contains(bodyString, expectedEvent) {
 		t.Errorf("SSE event not found in response. Got: %q Want to contain: %q", bodyString, expectedEvent)
+	}
+}
+
+func TestListNotificationEvents(t *testing.T) {
+	h, mockAgentRepo, mockTaskRepo, _, _, mockNotificationRepo, _ := setupTestHandlers(t)
+
+	eventID := uuid.New()
+	taskID := uuid.New()
+	agentID := uuid.New()
+	events := []*storage.NotificationEvent{
+		{
+			ID:        eventID,
+			TaskID:    taskID,
+			AgentID:   agentID,
+			Title:     "Matches found",
+			EventType: "file.lines_detected",
+			Severity:  "warning",
+			Status:    storage.NotificationEventStatusAccepted,
+			CreatedAt: time.Now(),
+		},
+	}
+
+	mockNotificationRepo.EXPECT().ListNotificationEvents(gomock.Any(), 100).Return(events, nil)
+	mockAgentRepo.EXPECT().ListAgents(gomock.Any()).Return([]*storage.Agent{{ID: agentID, Hostname: "Dell-17"}}, nil)
+	mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{
+		ID:          taskID,
+		Description: sql.NullString{String: "Analyze result.txt", Valid: true},
+		TaskType:    storage.TaskTypeExecPythonScript,
+	}, nil)
+
+	req := httptest.NewRequest("GET", "/notifications", nil)
+	rr := httptest.NewRecorder()
+	h.listNotificationEvents(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("listNotificationEvents handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Matches found") || !strings.Contains(body, "Analyze result.txt") {
+		t.Fatalf("expected response to render event title and task description, got %q", body)
+	}
+}
+
+func TestViewNotificationEvent(t *testing.T) {
+	h, _, _, _, _, mockNotificationRepo, _ := setupTestHandlers(t)
+
+	eventID := uuid.New()
+	event := &storage.NotificationEvent{
+		ID:          eventID,
+		TaskID:      uuid.New(),
+		AgentID:     uuid.New(),
+		Title:       "Matches found",
+		Summary:     "Found lines in result.txt",
+		EventType:   "file.lines_detected",
+		Severity:    "warning",
+		Status:      storage.NotificationEventStatusAccepted,
+		PayloadJSON: []byte(`{"schema":"alert_payload","summary":"Found lines in result.txt"}`),
+		CreatedAt:   time.Now(),
+	}
+	deliveries := []*storage.NotificationDelivery{{
+		ID:                  uuid.New(),
+		NotificationEventID: eventID,
+		Channel:             "telegram",
+		Destination:         "123456",
+		Status:              storage.NotificationDeliveryStatusDeadLetter,
+		Attempt:             3,
+		MaxAttempts:         3,
+		ScheduledAt:         time.Now(),
+	}}
+
+	mockNotificationRepo.EXPECT().GetNotificationEventByID(gomock.Any(), eventID).Return(event, nil)
+	mockNotificationRepo.EXPECT().ListNotificationDeliveriesByEventID(gomock.Any(), eventID).Return(deliveries, nil)
+
+	req := httptest.NewRequest("GET", "/notifications/"+eventID.String(), nil)
+	req.SetPathValue("id", eventID.String())
+	rr := httptest.NewRecorder()
+	h.viewNotificationEvent(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("viewNotificationEvent handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "Retry Now") || !strings.Contains(body, "Found lines in result.txt") {
+		t.Fatalf("expected response to render delivery retry and payload summary, got %q", body)
+	}
+}
+
+func TestRetryNotificationDelivery(t *testing.T) {
+	h, _, _, _, _, mockNotificationRepo, _ := setupTestHandlers(t)
+
+	deliveryID := uuid.New()
+	eventID := uuid.New()
+	delivery := &storage.NotificationDelivery{
+		ID:                  deliveryID,
+		NotificationEventID: eventID,
+		Status:              storage.NotificationDeliveryStatusDeadLetter,
+		Attempt:             3,
+		MaxAttempts:         3,
+	}
+
+	mockNotificationRepo.EXPECT().GetNotificationDeliveryByID(gomock.Any(), deliveryID).Return(delivery, nil)
+	mockNotificationRepo.EXPECT().ScheduleNotificationDeliveryRetry(gomock.Any(), deliveryID, int32(4), gomock.Any()).Return(nil)
+
+	req := httptest.NewRequest("POST", "/notifications/deliveries/"+deliveryID.String()+"/retry", nil)
+	req.SetPathValue("id", deliveryID.String())
+	rr := httptest.NewRecorder()
+	h.retryNotificationDelivery(rr, req)
+
+	if status := rr.Code; status != http.StatusSeeOther {
+		t.Fatalf("retryNotificationDelivery handler returned wrong status code: got %v want %v", status, http.StatusSeeOther)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/notifications/"+eventID.String() {
+		t.Fatalf("expected redirect to event details, got %s", loc)
+	}
+}
+
+func TestRetryNotificationDeliveryRejectsIneligibleStatus(t *testing.T) {
+	h, _, _, _, _, mockNotificationRepo, _ := setupTestHandlers(t)
+
+	deliveryID := uuid.New()
+	delivery := &storage.NotificationDelivery{
+		ID:                  deliveryID,
+		NotificationEventID: uuid.New(),
+		Status:              storage.NotificationDeliveryStatusSent,
+		Attempt:             1,
+		MaxAttempts:         3,
+	}
+
+	mockNotificationRepo.EXPECT().GetNotificationDeliveryByID(gomock.Any(), deliveryID).Return(delivery, nil)
+
+	req := httptest.NewRequest("POST", "/notifications/deliveries/"+deliveryID.String()+"/retry", nil)
+	req.SetPathValue("id", deliveryID.String())
+	rr := httptest.NewRecorder()
+	h.retryNotificationDelivery(rr, req)
+
+	if status := rr.Code; status != http.StatusBadRequest {
+		t.Fatalf("expected bad request for ineligible retry status, got %v", status)
 	}
 }
