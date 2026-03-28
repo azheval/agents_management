@@ -29,6 +29,7 @@ type TaskRepository interface {
 	ListTasks(ctx context.Context) ([]*Task, error)
 	ListTasksByAgentID(ctx context.Context, agentID uuid.UUID) ([]*Task, error)
 	UpdateTaskStatus(ctx context.Context, taskID uuid.UUID, status TaskStatus) error
+	UpdateTaskStatusIfCurrent(ctx context.Context, taskID uuid.UUID, currentStatus TaskStatus, newStatus TaskStatus) (bool, error)
 	CreateTaskResult(ctx context.Context, result *TaskResult) error
 	GetTaskResultByTaskID(ctx context.Context, taskID uuid.UUID) (*TaskResult, error)
 	GetScheduledTasks(ctx context.Context) ([]Task, error)

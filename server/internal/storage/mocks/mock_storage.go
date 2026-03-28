@@ -330,6 +330,21 @@ func (mr *MockTaskRepositoryMockRecorder) UpdateTaskStatus(ctx, taskID, status a
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTaskStatus", reflect.TypeOf((*MockTaskRepository)(nil).UpdateTaskStatus), ctx, taskID, status)
 }
 
+// UpdateTaskStatusIfCurrent mocks base method.
+func (m *MockTaskRepository) UpdateTaskStatusIfCurrent(ctx context.Context, taskID uuid.UUID, currentStatus, newStatus storage.TaskStatus) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateTaskStatusIfCurrent", ctx, taskID, currentStatus, newStatus)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateTaskStatusIfCurrent indicates an expected call of UpdateTaskStatusIfCurrent.
+func (mr *MockTaskRepositoryMockRecorder) UpdateTaskStatusIfCurrent(ctx, taskID, currentStatus, newStatus any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateTaskStatusIfCurrent", reflect.TypeOf((*MockTaskRepository)(nil).UpdateTaskStatusIfCurrent), ctx, taskID, currentStatus, newStatus)
+}
+
 // MockLogRepository is a mock of LogRepository interface.
 type MockLogRepository struct {
 	ctrl     *gomock.Controller

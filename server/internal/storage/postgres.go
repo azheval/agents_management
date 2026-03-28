@@ -147,6 +147,21 @@ func (r *PostgresTaskRepository) UpdateTaskStatus(ctx context.Context, taskID uu
 	return err
 }
 
+func (r *PostgresTaskRepository) UpdateTaskStatusIfCurrent(ctx context.Context, taskID uuid.UUID, currentStatus TaskStatus, newStatus TaskStatus) (bool, error) {
+	query := "UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2 AND status = $3"
+	result, err := r.db.ExecContext(ctx, query, newStatus, taskID, currentStatus)
+	if err != nil {
+		return false, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rowsAffected > 0, nil
+}
+
 func (r *PostgresTaskRepository) CreateTaskResult(ctx context.Context, result *TaskResult) error {
 	query := `
 		INSERT INTO task_results (id, task_id, agent_id, status, exit_code, output, output_file_path, duration_ms)

@@ -214,8 +214,8 @@ func TestAssignTasks(t *testing.T) {
 	// Expect UpdateTaskStatus to be called after the task is sent.
 	gomock.InOrder(
 		mockTaskRepo.EXPECT().
-			UpdateTaskStatus(gomock.Any(), taskID, storage.TaskStatusAssigned).
-			Return(nil),
+			UpdateTaskStatusIfCurrent(gomock.Any(), taskID, storage.TaskStatusPending, storage.TaskStatusAssigned).
+			Return(true, nil),
 		mockTaskRepo.EXPECT().
 			GetTaskByID(gomock.Any(), taskID).
 			Return(taskToSend, nil), // For the broadcast
@@ -239,6 +239,58 @@ func TestAssignTasks(t *testing.T) {
 			t.Errorf("Expected command 'echo', but got '%s'", sentCmd.Command)
 		}
 	case <-time.After(16 * time.Second): // Wait for slightly longer than the ticker
+		t.Fatal("timed out waiting for server to send task")
+	}
+}
+
+func TestAssignTasksSkipsAssignedOverwriteWhenTaskAlreadyFinished(t *testing.T) {
+	s, _, mockTaskRepo, _, _, _, _ := setupTestServer(t)
+	agentID := uuid.New()
+	taskID := uuid.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	md := metadata.New(map[string]string{"agent-id": agentID.String()})
+	grpcCtx := metadata.NewIncomingContext(ctx, md)
+
+	mockStream := &mockAssignTasksServer{
+		sent:    make(chan *api.TaskCommand, 1),
+		recv:    make(chan *api.TaskAcknowledgement),
+		err:     make(chan error, 1),
+		grpcCtx: grpcCtx,
+	}
+
+	taskToSend := &storage.Task{
+		ID:       taskID,
+		AgentID:  agentID,
+		TaskType: storage.TaskTypePushFile,
+		Status:   storage.TaskStatusPending,
+	}
+
+	mockTaskRepo.EXPECT().
+		GetPendingTasksByAgent(gomock.Any(), agentID).
+		Return([]*storage.Task{taskToSend}, nil).
+		MinTimes(1)
+
+	mockTaskRepo.EXPECT().
+		UpdateTaskStatusIfCurrent(gomock.Any(), taskID, storage.TaskStatusPending, storage.TaskStatusAssigned).
+		Return(false, nil)
+
+	mockTaskRepo.EXPECT().
+		GetTaskByID(gomock.Any(), taskID).
+		Times(0)
+
+	go func() {
+		s.AssignTasks(mockStream)
+	}()
+
+	select {
+	case sentCmd := <-mockStream.sent:
+		if sentCmd.TaskId != taskID.String() {
+			t.Errorf("Expected task ID %s, but got %s", taskID.String(), sentCmd.TaskId)
+		}
+	case <-time.After(16 * time.Second):
 		t.Fatal("timed out waiting for server to send task")
 	}
 }

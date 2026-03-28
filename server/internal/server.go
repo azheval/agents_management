@@ -596,16 +596,18 @@ func (s *Server) AssignTasks(stream api.TaskService_AssignTasksServer) error {
 					s.logger.Error("Failed to send task to agent", "task_id", task.ID, "agent_id", agentID, "error", err)
 					return err
 				}
-				err = s.storage.Task.UpdateTaskStatus(ctx, task.ID, storage.TaskStatusAssigned)
+				updated, err := s.storage.Task.UpdateTaskStatusIfCurrent(ctx, task.ID, storage.TaskStatusPending, storage.TaskStatusAssigned)
 				if err != nil {
 					s.logger.Error("Failed to update task status to assigned", "task_id", task.ID, "error", err)
-				} else {
+				} else if updated {
 					updatedTask, err := s.storage.Task.GetTaskByID(ctx, task.ID)
 					if err != nil {
 						s.logger.Error("Failed to get updated task for event publishing in AssignTasks", "task_id", task.ID, "error", err)
 					} else {
 						s.broker.Broadcast(updatedTask)
 					}
+				} else {
+					s.logger.Info("Skipped assigned status update because task state already changed", "task_id", task.ID)
 				}
 				s.logger.Info("Sent task to agent", "task_id", task.ID, "agent_id", agentID)
 			}
