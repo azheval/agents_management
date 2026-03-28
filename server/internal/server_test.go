@@ -174,7 +174,7 @@ func TestSubmitTaskResult(t *testing.T) {
 		gomock.InOrder(
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{ID: taskID}, nil),
 			mockTaskRepo.EXPECT().CreateTaskResult(gomock.Any(), gomock.Any()).Return(nil),
-			mockTaskRepo.EXPECT().UpdateTaskStatus(gomock.Any(), taskID, storage.TaskStatusCompleted).Return(nil),
+			mockTaskRepo.EXPECT().MarkTaskCompleted(gomock.Any(), taskID, storage.TaskStatusCompleted, gomock.Any()).Return(nil),
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{ID: taskID}, nil), // For broadcast
 			mockTaskRepo.EXPECT().GetTasksByPrerequisite(gomock.Any(), taskID).Return([]storage.Task{}, nil),
 		)
@@ -195,7 +195,7 @@ func TestSubmitTaskResult(t *testing.T) {
 		gomock.InOrder(
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{ID: taskID}, nil),
 			mockTaskRepo.EXPECT().CreateTaskResult(gomock.Any(), gomock.Any()).Return(nil),
-			mockTaskRepo.EXPECT().UpdateTaskStatus(gomock.Any(), taskID, storage.TaskStatusCompleted).Return(nil),
+			mockTaskRepo.EXPECT().MarkTaskCompleted(gomock.Any(), taskID, storage.TaskStatusCompleted, gomock.Any()).Return(nil),
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{ID: taskID}, nil), // For broadcast
 			mockTaskRepo.EXPECT().GetTasksByPrerequisite(gomock.Any(), taskID).Return([]storage.Task{chainedTask}, nil),
 		)
@@ -223,7 +223,7 @@ func TestSubmitTaskResult(t *testing.T) {
 		gomock.InOrder(
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(recurringTask, nil),
 			mockTaskRepo.EXPECT().CreateTaskResult(gomock.Any(), gomock.Any()).Return(nil),
-			mockTaskRepo.EXPECT().UpdateTaskStatus(gomock.Any(), taskID, storage.TaskStatusPending).Return(nil),
+			mockTaskRepo.EXPECT().MarkTaskCompleted(gomock.Any(), taskID, storage.TaskStatusPending, gomock.Any()).Return(nil),
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(recurringTask, nil),
 			mockTaskRepo.EXPECT().GetTasksByPrerequisite(gomock.Any(), taskID).Return([]storage.Task{}, nil),
 		)
@@ -242,7 +242,7 @@ func TestSubmitTaskResult(t *testing.T) {
 		mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{ID: taskID}, nil)
 		mockTaskRepo.EXPECT().CreateTaskResult(gomock.Any(), gomock.Any()).Return(dbError)
 		// Other calls should not be made
-		mockTaskRepo.EXPECT().UpdateTaskStatus(gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+		mockTaskRepo.EXPECT().MarkTaskCompleted(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 
 		res, err := s.SubmitTaskResult(context.Background(), req)
 		if err != nil {
@@ -258,7 +258,7 @@ func TestSubmitTaskResult(t *testing.T) {
 		gomock.InOrder(
 			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(&storage.Task{ID: taskID}, nil),
 			mockTaskRepo.EXPECT().CreateTaskResult(gomock.Any(), gomock.Any()).Return(nil),
-			mockTaskRepo.EXPECT().UpdateTaskStatus(gomock.Any(), taskID, storage.TaskStatusCompleted).Return(dbError),
+			mockTaskRepo.EXPECT().MarkTaskCompleted(gomock.Any(), taskID, storage.TaskStatusCompleted, gomock.Any()).Return(dbError),
 		)
 
 		res, err := s.SubmitTaskResult(context.Background(), req)

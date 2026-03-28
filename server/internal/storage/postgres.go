@@ -164,6 +164,39 @@ func (r *PostgresTaskRepository) UpdateTaskStatusIfCurrent(ctx context.Context, 
 	return rowsAffected > 0, nil
 }
 
+func (r *PostgresTaskRepository) MarkTaskStartedIfCurrent(ctx context.Context, taskID uuid.UUID, currentStatus TaskStatus, startedAt time.Time) (bool, error) {
+	query := `
+		UPDATE tasks
+		SET status = 'running',
+			started_at = $1,
+			updated_at = NOW()
+		WHERE id = $2 AND status = $3
+	`
+	result, err := r.db.ExecContext(ctx, query, startedAt, taskID, currentStatus)
+	if err != nil {
+		return false, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rowsAffected > 0, nil
+}
+
+func (r *PostgresTaskRepository) MarkTaskCompleted(ctx context.Context, taskID uuid.UUID, status TaskStatus, completedAt time.Time) error {
+	query := `
+		UPDATE tasks
+		SET status = $1,
+			completed_at = $2,
+			updated_at = NOW()
+		WHERE id = $3
+	`
+	_, err := r.db.ExecContext(ctx, query, status, completedAt, taskID)
+	return err
+}
+
 func (r *PostgresTaskRepository) CreateTaskResult(ctx context.Context, result *TaskResult) error {
 	query := `
 		INSERT INTO task_results (id, task_id, agent_id, status, exit_code, output, output_file_path, duration_ms)

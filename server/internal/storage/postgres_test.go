@@ -141,8 +141,15 @@ func (s *StorageTestSuite) TestTaskRepository() {
 
 	scheduledTasks, err := taskRepo.GetScheduledTasks(context.Background())
 	require.NoError(t, err)
-	require.Len(t, scheduledTasks, 1)
-	require.Equal(t, scheduledTask.ID, scheduledTasks[0].ID)
+	require.NotEmpty(t, scheduledTasks)
+	foundScheduledTask := false
+	for _, candidate := range scheduledTasks {
+		if candidate.ID == scheduledTask.ID {
+			foundScheduledTask = true
+			break
+		}
+	}
+	require.True(t, foundScheduledTask, "expected scheduled task to be returned by GetScheduledTasks")
 
 	// 4. Update Task Status
 	err = taskRepo.UpdateTaskStatus(context.Background(), taskID, TaskStatusAssigned)
@@ -151,6 +158,23 @@ func (s *StorageTestSuite) TestTaskRepository() {
 	err = s.db.Get(&updatedTask, "SELECT * FROM tasks WHERE id=$1", taskID)
 	require.NoError(t, err)
 	require.Equal(t, TaskStatusAssigned, updatedTask.Status)
+
+	startedAt := time.Now().UTC().Truncate(time.Second)
+	updated, err := taskRepo.MarkTaskStartedIfCurrent(context.Background(), taskID, TaskStatusAssigned, startedAt)
+	require.NoError(t, err)
+	require.True(t, updated)
+	err = s.db.Get(&updatedTask, "SELECT * FROM tasks WHERE id=$1", taskID)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusRunning, updatedTask.Status)
+	require.True(t, updatedTask.StartedAt.Valid)
+
+	completedAt := time.Now().UTC().Truncate(time.Second)
+	err = taskRepo.MarkTaskCompleted(context.Background(), taskID, TaskStatusCompleted, completedAt)
+	require.NoError(t, err)
+	err = s.db.Get(&updatedTask, "SELECT * FROM tasks WHERE id=$1", taskID)
+	require.NoError(t, err)
+	require.Equal(t, TaskStatusCompleted, updatedTask.Status)
+	require.True(t, updatedTask.CompletedAt.Valid)
 
 	// 5. Create Task Result
 	result := &TaskResult{

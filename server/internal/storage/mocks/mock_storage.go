@@ -272,6 +272,35 @@ func (mr *MockTaskRepositoryMockRecorder) GetTasksByPrerequisite(ctx, prerequisi
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetTasksByPrerequisite", reflect.TypeOf((*MockTaskRepository)(nil).GetTasksByPrerequisite), ctx, prerequisiteID)
 }
 
+// MarkTaskCompleted mocks base method.
+func (m *MockTaskRepository) MarkTaskCompleted(ctx context.Context, taskID uuid.UUID, status storage.TaskStatus, completedAt time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkTaskCompleted", ctx, taskID, status, completedAt)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MarkTaskCompleted indicates an expected call of MarkTaskCompleted.
+func (mr *MockTaskRepositoryMockRecorder) MarkTaskCompleted(ctx, taskID, status, completedAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkTaskCompleted", reflect.TypeOf((*MockTaskRepository)(nil).MarkTaskCompleted), ctx, taskID, status, completedAt)
+}
+
+// MarkTaskStartedIfCurrent mocks base method.
+func (m *MockTaskRepository) MarkTaskStartedIfCurrent(ctx context.Context, taskID uuid.UUID, currentStatus storage.TaskStatus, startedAt time.Time) (bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MarkTaskStartedIfCurrent", ctx, taskID, currentStatus, startedAt)
+	ret0, _ := ret[0].(bool)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// MarkTaskStartedIfCurrent indicates an expected call of MarkTaskStartedIfCurrent.
+func (mr *MockTaskRepositoryMockRecorder) MarkTaskStartedIfCurrent(ctx, taskID, currentStatus, startedAt any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MarkTaskStartedIfCurrent", reflect.TypeOf((*MockTaskRepository)(nil).MarkTaskStartedIfCurrent), ctx, taskID, currentStatus, startedAt)
+}
+
 // ListTasks mocks base method.
 func (m *MockTaskRepository) ListTasks(ctx context.Context) ([]*storage.Task, error) {
 	m.ctrl.T.Helper()

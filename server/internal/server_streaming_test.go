@@ -349,6 +349,26 @@ func TestAssignTasksDispatchesQueuedScheduledTask(t *testing.T) {
 	}
 }
 
+func TestHandleTaskAcknowledgementMarksTaskRunning(t *testing.T) {
+	s, _, mockTaskRepo, _, _, _, _ := setupTestServer(t)
+	taskID := uuid.New()
+	task := &storage.Task{ID: taskID, Status: storage.TaskStatusRunning}
+
+	gomock.InOrder(
+		mockTaskRepo.EXPECT().
+			MarkTaskStartedIfCurrent(gomock.Any(), taskID, storage.TaskStatusAssigned, gomock.Any()).
+			Return(true, nil),
+		mockTaskRepo.EXPECT().
+			GetTaskByID(gomock.Any(), taskID).
+			Return(task, nil),
+	)
+
+	s.handleTaskAcknowledgement(context.Background(), &api.TaskAcknowledgement{
+		TaskId: taskID.String(),
+		Status: api.TaskAcknowledgementStatus_PROCESSING,
+	})
+}
+
 func TestGetTaskPackagePushFile(t *testing.T) {
 	s, _, mockTaskRepo, _, _, _, _ := setupTestServer(t)
 	taskID := uuid.New()

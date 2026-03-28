@@ -246,7 +246,7 @@ func (s *Server) SubmitTaskResult(ctx context.Context, in *api.SubmitTaskResultR
 		persistedTaskStatus = storage.TaskStatusPending
 	}
 
-	if err := s.storage.Task.UpdateTaskStatus(ctx, taskID, persistedTaskStatus); err != nil {
+	if err := s.storage.Task.MarkTaskCompleted(ctx, taskID, persistedTaskStatus, time.Now().UTC()); err != nil {
 		s.logger.Error("Failed to update final task status", "task_id", taskID, "error", err)
 		return &api.SubmitTaskResultResponse{Success: false, Message: "Failed to update final task status"}, nil
 	}
@@ -584,6 +584,7 @@ func (s *Server) AssignTasks(stream api.TaskService_AssignTasksServer) error {
 			return err
 		case ack := <-ackChan:
 			s.logger.Info("Received acknowledgement", "agent_id", agentID, "task_id", ack.TaskId, "status", ack.Status)
+			s.handleTaskAcknowledgement(ctx, ack)
 		case <-ticker.C:
 			s.dispatchQueuedTasks(ctx, stream, agentID)
 
@@ -603,6 +604,35 @@ func (s *Server) AssignTasks(stream api.TaskService_AssignTasksServer) error {
 			}
 		}
 	}
+}
+
+func (s *Server) handleTaskAcknowledgement(ctx context.Context, ack *api.TaskAcknowledgement) {
+	if ack == nil || ack.GetStatus() != api.TaskAcknowledgementStatus_PROCESSING {
+		return
+	}
+
+	taskID, err := uuid.Parse(ack.GetTaskId())
+	if err != nil {
+		s.logger.Warn("Received acknowledgement with invalid task ID", "task_id", ack.GetTaskId(), "status", ack.GetStatus(), "error", err)
+		return
+	}
+
+	updated, err := s.storage.Task.MarkTaskStartedIfCurrent(ctx, taskID, storage.TaskStatusAssigned, time.Now().UTC())
+	if err != nil {
+		s.logger.Error("Failed to mark task as running", "task_id", taskID, "error", err)
+		return
+	}
+	if !updated {
+		s.logger.Info("Skipped running status update because task state already changed", "task_id", taskID)
+		return
+	}
+
+	updatedTask, err := s.storage.Task.GetTaskByID(ctx, taskID)
+	if err != nil {
+		s.logger.Error("Failed to get running task for event publishing", "task_id", taskID, "error", err)
+		return
+	}
+	s.broker.Broadcast(updatedTask)
 }
 
 func (s *Server) dispatchQueuedTasks(ctx context.Context, stream api.TaskService_AssignTasksServer, agentID uuid.UUID) {

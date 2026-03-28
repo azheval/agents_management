@@ -237,13 +237,17 @@ func listenForTasks(agentID string, conn *grpc.ClientConn, logger *slog.Logger) 
 		}
 
 		// Execute the task in a new goroutine to avoid blocking the stream
-		go handleTask(agentID, taskClient, agentClient, task, logger)
+		go handleTask(agentID, taskClient, agentClient, task, logger, ackChan)
 	}
 }
 
-func handleTask(agentID string, taskClient pb.TaskServiceClient, agentClient pb.AgentServiceClient, task *pb.TaskCommand, logger *slog.Logger) {
+func handleTask(agentID string, taskClient pb.TaskServiceClient, agentClient pb.AgentServiceClient, task *pb.TaskCommand, logger *slog.Logger, ackChan chan<- *pb.TaskAcknowledgement) {
 	taskLogger := logger.With("task_id", task.GetTaskId(), "type", task.GetTaskType().String())
 	taskLogger.Info("Handling task")
+	ackChan <- &pb.TaskAcknowledgement{
+		TaskId: task.GetTaskId(),
+		Status: pb.TaskAcknowledgementStatus_PROCESSING,
+	}
 
 	switch task.GetTaskType() {
 	case pb.TaskType_EXEC_COMMAND:
