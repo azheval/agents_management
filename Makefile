@@ -11,26 +11,29 @@ proto:
 tidy:
 	go mod tidy
 
+CONFIG_SRC ?= server/config.json
+CONFIG_DST ?= build/config.json
+
 build: tidy build-server build-agent-windows
 
 build-server:
-	go build -o server.exe ./server/cmd/server
+	mkdir -p build
+	cp $(CONFIG_SRC) $(CONFIG_DST)
+	go build -o build/server.exe ./server/cmd/server
 
 build-agent-windows:
-	GOOS=windows GOARCH=amd64 go build -o agent.exe ./agent/cmd/agent
+	mkdir -p build
+	GOOS=windows GOARCH=amd64 go build -o build/agent.exe ./agent/cmd/agent
 
 build-agent-linux:
-	GOOS=linux GOARCH=amd64 go build -o agent ./agent/cmd/agent
-
-
-# Path to the server configuration file
-CONFIG_PATH ?= server/config.json
+	mkdir -p build
+	GOOS=linux GOARCH=amd64 go build -o build/agent ./agent/cmd/agent
 
 run-server:
-	./server.exe -config $(CONFIG_PATH)
+	./build/server.exe
 
 run-agent:
-	./agent.exe
+	./build/agent.exe
 
 # Docker database management
 db-up:
