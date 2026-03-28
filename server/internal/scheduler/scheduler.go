@@ -22,6 +22,8 @@ type Scheduler struct {
 	cancel    context.CancelFunc
 }
 
+const schedulerRefreshInterval = 15 * time.Second
+
 // NewScheduler creates a new scheduler.
 func NewScheduler(logger *slog.Logger, taskRepo storage.TaskRepository, taskQueue chan uuid.UUID) *Scheduler {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -43,16 +45,20 @@ func (s *Scheduler) Start() error {
 	if err := s.loadScheduledTasks(s.ctx); err != nil {
 		return err
 	}
+	s.checkAndQueueDueTasks()
 
 	s.cron.Start()
 
 	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
+		ticker := time.NewTicker(schedulerRefreshInterval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
+				if err := s.loadScheduledTasks(s.ctx); err != nil {
+					s.logger.Error("Failed to refresh scheduled tasks", "error", err)
+				}
 				s.checkAndQueueDueTasks()
 			case <-s.ctx.Done():
 				s.logger.Info("Scheduler stopping.")
@@ -83,7 +89,17 @@ func (s *Scheduler) loadScheduledTasks(ctx context.Context) error {
 	}
 
 	for _, task := range tasks {
-		s.add(task)
+		switch task.ScheduleType.String {
+		case "ONCE":
+			s.add(task)
+		case "RECURRING":
+			if _, exists := s.tasks[task.ID]; exists {
+				continue
+			}
+			if _, err := s.AddRecurring(task); err != nil {
+				s.logger.Error("Failed to register recurring task", "task_id", task.ID, "error", err)
+			}
+		}
 	}
 	s.logger.Info("Finished loading scheduled tasks", "count", len(tasks))
 	return nil
@@ -98,10 +114,10 @@ func (s *Scheduler) checkAndQueueDueTasks() {
 			continue // Skip non-pending tasks
 		}
 
-		if task.ScheduleType.String == "ONCE" && task.ScheduledAt.Valid && task.ScheduledAt.Time.Before(now) {
+		if task.ScheduleType.String == "ONCE" && task.ScheduledAt.Valid && !task.ScheduledAt.Time.After(now) {
 			s.logger.Info("Queuing one-time task", "task_id", id)
 			s.taskQueue <- id
-			// Here you would typically update the task status to 'assigned' or remove it from the scheduler
+			delete(s.tasks, id)
 		}
 	}
 }

@@ -50,8 +50,8 @@
                         <div id="schedule-params-container" class="space-y-4">
                             <!-- Scheduled (ONCE) -->
                             <div id="param_ONCE" class="schedule-param hidden">
-                                <label for="scheduled_at" class="block text-sm font-medium text-gray-700">Execution Time (UTC)</label>
-                                <input type="datetime-local" name="scheduled_at" id="scheduled_at" value="{{.Task.ScheduledAt.Time.Format "2006-01-02T15:04"}}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <label for="scheduled_at" class="block text-sm font-medium text-gray-700">Execution Time (Local)</label>
+                                <input type="datetime-local" name="scheduled_at" id="scheduled_at" value="{{.Task.ScheduledAt.Time.Local.Format "2006-01-02T15:04"}}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                             </div>
 
                             <!-- Recurring -->

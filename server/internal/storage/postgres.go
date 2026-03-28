@@ -113,7 +113,9 @@ func (r *PostgresTaskRepository) GetPendingTasksByAgent(ctx context.Context, age
 	var tasks []*Task
 	query := `
 		SELECT * FROM tasks
-		WHERE agent_id = $1 AND status = 'pending'
+		WHERE agent_id = $1
+		  AND status = 'pending'
+		  AND schedule_type IS NULL
 		ORDER BY created_at ASC;
 	`
 	err := r.db.SelectContext(ctx, &tasks, query, agentID)
@@ -180,7 +182,7 @@ func (r *PostgresTaskRepository) GetTaskResultByTaskID(ctx context.Context, task
 
 func (r *PostgresTaskRepository) GetScheduledTasks(ctx context.Context) ([]Task, error) {
 	var tasks []Task
-	query := "SELECT * FROM tasks WHERE schedule_type IS NOT NULL AND status = 'pending'"
+	query := "SELECT * FROM tasks WHERE schedule_type IN ('ONCE', 'RECURRING') AND status = 'pending'"
 	err := r.db.SelectContext(ctx, &tasks, query)
 	return tasks, err
 }

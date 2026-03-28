@@ -415,12 +415,12 @@ func (h *Handlers) updateTaskSchedule(w http.ResponseWriter, r *http.Request) {
 	switch scheduleType {
 	case "ONCE":
 		// The browser sends datetime-local format "YYYY-MM-DDTHH:MM"
-		t, err := time.Parse("2006-01-02T15:04", r.FormValue("scheduled_at"))
+		t, err := time.ParseInLocation("2006-01-02T15:04", r.FormValue("scheduled_at"), time.Local)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Invalid scheduled_at time format: %v", err), http.StatusBadRequest)
 			return
 		}
-		scheduledAt = sql.NullTime{Time: t, Valid: true}
+		scheduledAt = sql.NullTime{Time: t.UTC(), Valid: true}
 	case "RECURRING":
 		cronExpr := r.FormValue("cron_expression")
 		if cronExpr == "" {
@@ -530,12 +530,12 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 
 	switch scheduleType {
 	case "ONCE":
-		t, err := time.Parse("2006-01-02 15:04", r.FormValue("scheduled_at"))
+		t, err := time.ParseInLocation("2006-01-02 15:04", r.FormValue("scheduled_at"), time.Local)
 		if err != nil {
 			h.showNewTaskForm(w, r, fmt.Errorf("invalid scheduled_at time format: %w", err))
 			return
 		}
-		scheduledAt = sql.NullTime{Time: t, Valid: true}
+		scheduledAt = sql.NullTime{Time: t.UTC(), Valid: true}
 	case "RECURRING":
 		cronExpr := r.FormValue("cron_expression")
 		if cronExpr == "" { // Basic validation

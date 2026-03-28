@@ -110,6 +110,40 @@ func (s *StorageTestSuite) TestTaskRepository() {
 	require.Equal(t, taskID, tasks[0].ID)
 	require.Equal(t, "alert_payload.v1", tasks[0].ResultContract.String)
 
+	scheduledTask := &Task{
+		ID:           uuid.New(),
+		AgentID:      agent.ID,
+		TaskType:     TaskTypeExecCommand,
+		Status:       TaskStatusPending,
+		ScheduleType: sql.NullString{String: "ONCE", Valid: true},
+		ScheduledAt:  sql.NullTime{Time: time.Now().UTC().Add(time.Hour), Valid: true},
+	}
+	err = taskRepo.CreateTask(context.Background(), scheduledTask)
+	require.NoError(t, err)
+	defer s.db.Exec("DELETE FROM tasks WHERE id = $1", scheduledTask.ID)
+
+	chainedTask := &Task{
+		ID:                 uuid.New(),
+		AgentID:            agent.ID,
+		TaskType:           TaskTypeExecCommand,
+		Status:             TaskStatusPending,
+		ScheduleType:       sql.NullString{String: "CHAINED", Valid: true},
+		PrerequisiteTaskID: uuid.NullUUID{UUID: taskID, Valid: true},
+	}
+	err = taskRepo.CreateTask(context.Background(), chainedTask)
+	require.NoError(t, err)
+	defer s.db.Exec("DELETE FROM tasks WHERE id = $1", chainedTask.ID)
+
+	tasks, err = taskRepo.GetPendingTasksByAgent(context.Background(), agent.ID)
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, taskID, tasks[0].ID)
+
+	scheduledTasks, err := taskRepo.GetScheduledTasks(context.Background())
+	require.NoError(t, err)
+	require.Len(t, scheduledTasks, 1)
+	require.Equal(t, scheduledTask.ID, scheduledTasks[0].ID)
+
 	// 4. Update Task Status
 	err = taskRepo.UpdateTaskStatus(context.Background(), taskID, TaskStatusAssigned)
 	require.NoError(t, err)

@@ -4,6 +4,7 @@ import (
 	"agent-management/server/internal/events"
 	"agent-management/server/internal/notifier"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
@@ -211,6 +212,28 @@ func TestSubmitTaskResult(t *testing.T) {
 			}
 		case <-time.After(1 * time.Second):
 			t.Fatal("timed out waiting for chained task to be queued")
+		}
+	})
+
+	t.Run("Recurring task returns to pending after execution", func(t *testing.T) {
+		recurringTask := &storage.Task{
+			ID:           taskID,
+			ScheduleType: sql.NullString{String: "RECURRING", Valid: true},
+		}
+		gomock.InOrder(
+			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(recurringTask, nil),
+			mockTaskRepo.EXPECT().CreateTaskResult(gomock.Any(), gomock.Any()).Return(nil),
+			mockTaskRepo.EXPECT().UpdateTaskStatus(gomock.Any(), taskID, storage.TaskStatusPending).Return(nil),
+			mockTaskRepo.EXPECT().GetTaskByID(gomock.Any(), taskID).Return(recurringTask, nil),
+			mockTaskRepo.EXPECT().GetTasksByPrerequisite(gomock.Any(), taskID).Return([]storage.Task{}, nil),
+		)
+
+		res, err := s.SubmitTaskResult(context.Background(), req)
+		if err != nil {
+			t.Fatalf("SubmitTaskResult for recurring task failed: %v", err)
+		}
+		if !res.Success {
+			t.Errorf("SubmitTaskResult for recurring task returned success=false")
 		}
 	})
 

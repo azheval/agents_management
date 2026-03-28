@@ -34,7 +34,7 @@ func TestLoadScheduledTasks(t *testing.T) {
 		// Expected tasks to be returned by the mock
 		expectedTasks := []storage.Task{
 			{ID: uuid.New(), Status: storage.TaskStatusPending, ScheduleType: sql.NullString{String: "ONCE", Valid: true}},
-			{ID: uuid.New(), Status: storage.TaskStatusPending, ScheduleType: sql.NullString{String: "RECURRING", Valid: true}},
+			{ID: uuid.New(), Status: storage.TaskStatusPending, ScheduleType: sql.NullString{String: "RECURRING", Valid: true}, CronExpression: sql.NullString{String: "* * * * *", Valid: true}},
 		}
 
 		mockTaskRepo.EXPECT().
@@ -47,7 +47,12 @@ func TestLoadScheduledTasks(t *testing.T) {
 			t.Fatalf("loadScheduledTasks failed: %v", err)
 		}
 
-		// Additional checks could be added here to see if the tasks were added to the scheduler's internal state
+		if _, exists := s.tasks[expectedTasks[0].ID]; !exists {
+			t.Fatal("expected one-time task to be loaded into scheduler state")
+		}
+		if _, exists := s.tasks[expectedTasks[1].ID]; !exists {
+			t.Fatal("expected recurring task to be registered in scheduler state")
+		}
 	})
 
 	t.Run("Handles database error on load", func(t *testing.T) {
@@ -88,6 +93,9 @@ func TestCheckAndQueueDueTasks(t *testing.T) {
 		case <-time.After(1 * time.Second):
 			t.Fatal("timed out waiting for task to be queued")
 		}
+		if _, exists := s.tasks[taskID]; exists {
+			t.Fatal("expected queued one-time task to be removed from scheduler state")
+		}
 	})
 
 	t.Run("Correctly queues a due recurring task", func(t *testing.T) {
@@ -110,4 +118,36 @@ func TestCheckAndQueueDueTasks(t *testing.T) {
 			t.Fatal("recurring task was not added to the scheduler")
 		}
 	})
+}
+
+func TestLoadScheduledTasksDoesNotDuplicateRecurringRegistration(t *testing.T) {
+	s, mockTaskRepo := setupTestScheduler(t)
+
+	recurringTask := storage.Task{
+		ID:             uuid.New(),
+		Status:         storage.TaskStatusPending,
+		ScheduleType:   sql.NullString{String: "RECURRING", Valid: true},
+		CronExpression: sql.NullString{String: "* * * * *", Valid: true},
+	}
+
+	mockTaskRepo.EXPECT().
+		GetScheduledTasks(gomock.Any()).
+		Return([]storage.Task{recurringTask}, nil).
+		Times(2)
+
+	err := s.loadScheduledTasks(context.Background())
+	if err != nil {
+		t.Fatalf("first loadScheduledTasks failed: %v", err)
+	}
+	if len(s.tasks) != 1 {
+		t.Fatalf("expected 1 scheduled task after first load, got %d", len(s.tasks))
+	}
+
+	err = s.loadScheduledTasks(context.Background())
+	if err != nil {
+		t.Fatalf("second loadScheduledTasks failed: %v", err)
+	}
+	if len(s.tasks) != 1 {
+		t.Fatalf("expected recurring task registration to remain unique, got %d entries", len(s.tasks))
+	}
 }

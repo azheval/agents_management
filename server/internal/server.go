@@ -34,14 +34,14 @@ type Server struct {
 	logger                         *slog.Logger
 	storage                        *storage.Storage
 	notifier                       *notifier.MultiNotifier
-	taskQueue                      chan<- uuid.UUID
+	taskQueue                      chan uuid.UUID
 	broker                         *events.EventBroker
 	notificationRuleEngine         *NotificationRuleEngine
 	notificationRouter             *NotificationRouter
 	notificationDeliveryDispatcher *NotificationDeliveryDispatcher
 }
 
-func NewServer(logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan<- uuid.UUID, broker *events.EventBroker) *Server {
+func NewServer(logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan uuid.UUID, broker *events.EventBroker) *Server {
 	return &Server{
 		logger:    logger,
 		storage:   storage,
@@ -241,7 +241,12 @@ func (s *Server) SubmitTaskResult(ctx context.Context, in *api.SubmitTaskResultR
 		finalTaskStatus = storage.TaskStatusFailed
 	}
 
-	if err := s.storage.Task.UpdateTaskStatus(ctx, taskID, finalTaskStatus); err != nil {
+	persistedTaskStatus := finalTaskStatus
+	if task.ScheduleType.Valid && task.ScheduleType.String == "RECURRING" {
+		persistedTaskStatus = storage.TaskStatusPending
+	}
+
+	if err := s.storage.Task.UpdateTaskStatus(ctx, taskID, persistedTaskStatus); err != nil {
 		s.logger.Error("Failed to update final task status", "task_id", taskID, "error", err)
 		return &api.SubmitTaskResultResponse{Success: false, Message: "Failed to update final task status"}, nil
 	}
@@ -580,6 +585,8 @@ func (s *Server) AssignTasks(stream api.TaskService_AssignTasksServer) error {
 		case ack := <-ackChan:
 			s.logger.Info("Received acknowledgement", "agent_id", agentID, "task_id", ack.TaskId, "status", ack.Status)
 		case <-ticker.C:
+			s.dispatchQueuedTasks(ctx, stream, agentID)
+
 			tasks, err := s.storage.Task.GetPendingTasksByAgent(ctx, agentID)
 			if err != nil {
 				s.logger.Error("Failed to get pending tasks", "agent_id", agentID, "error", err)
@@ -590,46 +597,90 @@ func (s *Server) AssignTasks(stream api.TaskService_AssignTasksServer) error {
 			}
 			s.logger.Info("Found pending tasks for agent", "count", len(tasks), "agent_id", agentID)
 			for _, task := range tasks {
-				taskType, ok := mapStorageTaskType(task.TaskType)
-				if !ok {
-					s.logger.Error("Unsupported task type in storage", "task_id", task.ID, "agent_id", agentID, "task_type", task.TaskType)
-					continue
-				}
-
-				taskCmd := &api.TaskCommand{
-					TaskId:           task.ID.String(),
-					TaskType:         taskType,
-					Command:          task.Command.String,
-					Args:             task.Args,
-					EntrypointScript: task.EntrypointScript.String, // ИСПРАВЛЕНО
-					SourcePath:       task.SourcePath.String,
-					DestinationPath:  task.DestinationPath.String,
-					TimeoutSeconds:   task.TimeoutSeconds.Int32,
-				}
-				if err := stream.Send(taskCmd); err != nil {
-					s.logger.Error("Failed to send task to agent", "task_id", task.ID, "agent_id", agentID, "error", err)
+				if err := s.sendTaskToAgent(ctx, stream, agentID, task); err != nil {
 					return err
 				}
-				updated, err := s.storage.Task.UpdateTaskStatusIfCurrent(ctx, task.ID, storage.TaskStatusPending, storage.TaskStatusAssigned)
-				if err != nil {
-					s.logger.Error("Failed to update task status to assigned", "task_id", task.ID, "error", err)
-				} else if updated {
-					updatedTask, err := s.storage.Task.GetTaskByID(ctx, task.ID)
-					if err != nil {
-						s.logger.Error("Failed to get updated task for event publishing in AssignTasks", "task_id", task.ID, "error", err)
-					} else {
-						s.broker.Broadcast(updatedTask)
-					}
-				} else {
-					s.logger.Info("Skipped assigned status update because task state already changed", "task_id", task.ID)
-				}
-				s.logger.Info("Sent task to agent", "task_id", task.ID, "agent_id", agentID)
 			}
 		}
 	}
 }
 
-func StartServer(cfg config.ServerConfig, logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan<- uuid.UUID, broker *events.EventBroker, ruleEngine *NotificationRuleEngine, router *NotificationRouter, dispatcher *NotificationDeliveryDispatcher) {
+func (s *Server) dispatchQueuedTasks(ctx context.Context, stream api.TaskService_AssignTasksServer, agentID uuid.UUID) {
+	if s.taskQueue == nil {
+		return
+	}
+
+	queueDepth := len(s.taskQueue)
+	if queueDepth == 0 {
+		return
+	}
+
+	deferred := make([]uuid.UUID, 0)
+	for i := 0; i < queueDepth; i++ {
+		taskID := <-s.taskQueue
+		task, err := s.storage.Task.GetTaskByID(ctx, taskID)
+		if err != nil {
+			s.logger.Error("Failed to load queued task", "task_id", taskID, "error", err)
+			continue
+		}
+		if task.AgentID != agentID {
+			deferred = append(deferred, taskID)
+			continue
+		}
+		if task.Status != storage.TaskStatusPending {
+			s.logger.Info("Skipping queued task because it is no longer pending", "task_id", task.ID, "status", task.Status)
+			continue
+		}
+		if err := s.sendTaskToAgent(ctx, stream, agentID, task); err != nil {
+			s.logger.Error("Failed to dispatch queued task to agent", "task_id", task.ID, "agent_id", agentID, "error", err)
+			deferred = append(deferred, taskID)
+		}
+	}
+
+	for _, taskID := range deferred {
+		s.taskQueue <- taskID
+	}
+}
+
+func (s *Server) sendTaskToAgent(ctx context.Context, stream api.TaskService_AssignTasksServer, agentID uuid.UUID, task *storage.Task) error {
+	taskType, ok := mapStorageTaskType(task.TaskType)
+	if !ok {
+		s.logger.Error("Unsupported task type in storage", "task_id", task.ID, "agent_id", agentID, "task_type", task.TaskType)
+		return nil
+	}
+
+	taskCmd := &api.TaskCommand{
+		TaskId:           task.ID.String(),
+		TaskType:         taskType,
+		Command:          task.Command.String,
+		Args:             task.Args,
+		EntrypointScript: task.EntrypointScript.String,
+		SourcePath:       task.SourcePath.String,
+		DestinationPath:  task.DestinationPath.String,
+		TimeoutSeconds:   task.TimeoutSeconds.Int32,
+	}
+	if err := stream.Send(taskCmd); err != nil {
+		s.logger.Error("Failed to send task to agent", "task_id", task.ID, "agent_id", agentID, "error", err)
+		return err
+	}
+	updated, err := s.storage.Task.UpdateTaskStatusIfCurrent(ctx, task.ID, storage.TaskStatusPending, storage.TaskStatusAssigned)
+	if err != nil {
+		s.logger.Error("Failed to update task status to assigned", "task_id", task.ID, "error", err)
+	} else if updated {
+		updatedTask, err := s.storage.Task.GetTaskByID(ctx, task.ID)
+		if err != nil {
+			s.logger.Error("Failed to get updated task for event publishing in AssignTasks", "task_id", task.ID, "error", err)
+		} else {
+			s.broker.Broadcast(updatedTask)
+		}
+	} else {
+		s.logger.Info("Skipped assigned status update because task state already changed", "task_id", task.ID)
+	}
+	s.logger.Info("Sent task to agent", "task_id", task.ID, "agent_id", agentID)
+	return nil
+}
+
+func StartServer(cfg config.ServerConfig, logger *slog.Logger, storage *storage.Storage, notifier *notifier.MultiNotifier, taskQueue chan uuid.UUID, broker *events.EventBroker, ruleEngine *NotificationRuleEngine, router *NotificationRouter, dispatcher *NotificationDeliveryDispatcher) {
 	lis, err := net.Listen("tcp", cfg.ListenAddress)
 	if err != nil {
 		logger.Error("failed to listen", "address", cfg.ListenAddress, "error", err)
