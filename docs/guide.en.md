@@ -1,0 +1,116 @@
+# Agent Management
+
+## Database
+
+To start the database container, use the command
+
+```make
+make db-up
+```
+
+or
+
+```cmd
+docker-compose up -d
+```
+
+On the first run, you need to create database tables by running migration
+
+```make
+make db-migrate-fresh
+```
+
+or
+
+```cmd
+docker exec -i agent_db psql -U admin -d agent_management < db/migrations/001_full_schema.sql
+```
+
+## Starting Server and Agent
+
+To start the server, use the command
+
+```cmd
+<path>/server.exe -config <path>/config.json
+```
+
+An example of the `config.json` file is in `server/config.json`.
+
+To start the agent, use the command
+
+```cmd
+<path>/agent.exe
+```
+
+When starting the agent, a service file `agent.id` with the agent's unique identifier is created.
+
+## Management Interface
+
+### Managing Agents
+
+By default, the management interface is available on port 8080. The port is set in the `config.json` file with the setting
+
+```json
+"webserver": {"listen_address": ":8080"}
+```
+
+![img_001.png](/docs/img/img_001.png)
+
+### Creating Tasks
+
+A new task is created from the `Tasks` form using the `Create new task` command.
+In the task creation form, agents that will execute the task are selected. For each selected agent, its own unique task will be created.
+The task type is specified. For each task type, unique fields need to be filled in.
+
+#### EXEC_COMMAND
+
+![img_002.png](/docs/img/img_002.png)
+
+Fill in the task description, command (for example, `C:/ws/tech_log/go/techlog-stat/.dist/techlog-stat.exe`), command arguments are specified separated by commas (for example, `sdbl-context,--input,C:/ws/tech_log/logs,--glob,*/*.*,--output,C:/ws/tech_log/out/sdbl_agent,--top,10`).
+
+#### EXEC_PYTHON_SCRIPT
+
+![img_003.png](/docs/img/img_003.png)
+
+Fill in the task description, select the necessary files (not only python files), specify the orchestrator file (Entrypoint) that will be called by the agent for execution.
+All specified files will be placed in an archive when creating the task, transferred to the agent, extracted and executed.
+**Important**. Python must be pre-installed on the remote workplace.
+
+#### FETCH_FILE
+
+![img_004.png](/docs/img/img_004.png)
+
+Fill in the task description, path to the file for the agent, path where the server will save the file.
+
+#### PUSH_FILE
+
+![img_005.png](/docs/img/img_005.png)
+
+Fill in the task description, path for saving the file by the agent, files transmitted by the server.
+
+#### AGENT_UPDATE
+
+![img_006.png](/docs/img/img_006.png)
+
+Fill in the task description, specify the new agent version file. The checksum is calculated automatically.
+
+Select the required task execution schedule, specify the timeout for command execution:
+
+- Immediate. The task executes immediately.
+- Scheduled. The task will be executed at the specified date and time.
+- Recurring. The task will be executed periodically according to the specified schedule.
+- Chained. The task will be executed after the previous (selected) task completes.
+
+### Task List
+
+![img_007.png](/docs/img/img_007.png)
+
+### Task Execution Log
+
+![img_008.png](/docs/img/img_008.png)
+
+## Notifications
+
+When filling in the `config.json` file section ```telegram {}``` a notification about task completion will be received
+
+![img_009.png](/docs/img/img_009.png)

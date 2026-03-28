@@ -4,6 +4,10 @@
 
 Distributed task management system with centralized server and distributed agents.
 
+[User guide English](/docs/guide.en.md)
+[Кіраўніцтва карыстальніка Беларускi](/docs/guide.by.md)
+[Руководство пользователя Русский](/docs/guide.ru.md)
+
 ![C4 Context](/docs/C4_Context.svg)
 
 ## Features
