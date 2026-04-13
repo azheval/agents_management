@@ -56,6 +56,46 @@ By default, the management interface is available on port 8080. The port is set 
 
 ![img_001.png](/docs/img/img_001.png)
 
+### Access Control
+
+The web interface uses username and password authentication. User accounts, roles, and role assignments are stored in the database tables `users`, `roles`, and `user_roles`.
+
+Permissions are configured in the `Access` section.
+
+![img_013.png](/docs/img/img_013.png)
+
+The system uses three groups of permissions:
+
+- `admin` and `full_access` grant full access to all sections and all agents.
+- Global `action.*` roles define which task types a user is allowed to create.
+- Permissions of the form `agent:<uuid>:...` define which actions are allowed for a specific agent.
+
+To create a task, a user must have both:
+
+- the global action role matching the task type, for example `action.exec_command`;
+- the `agent:<uuid>:task_create` permission for the selected agent.
+
+The permission matrix in the `Access` section lets you assign rights at the intersection of user, agent, and operation. It supports separate permissions for:
+
+- viewing the agent;
+- viewing metrics;
+- viewing tasks;
+- creating tasks;
+- rescheduling tasks;
+- viewing notifications;
+- toggling agent status;
+- deleting the agent.
+
+Recommended setup flow:
+
+1. Create a user in the `Access` section.
+2. If the user needs unrestricted access, assign `admin` or `full_access`.
+3. If restricted access is needed, assign only the required global `action.*` roles.
+4. In the matrix, mark permissions only for the agents and operations the user actually needs.
+5. Verify the result by signing in with the new account.
+
+The `agent:<uuid>` role is kept for backward compatibility with older configurations and means broad access to the agent. For new setups, the fine-grained permission matrix is recommended.
+
 ### Creating Tasks
 
 A new task is created from the `Tasks` form using the `Create new task` command.

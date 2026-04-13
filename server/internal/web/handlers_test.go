@@ -1,6 +1,7 @@
 package web
 
 import (
+	"agent-management/server/internal/auth"
 	"agent-management/server/internal/events"
 	"agent-management/server/internal/notifier"
 	"bytes"
@@ -42,7 +43,9 @@ func setupTestHandlers(t *testing.T) (*Handlers, *mocks.MockAgentRepository, *mo
 	}
 
 	var funcMap = template.FuncMap{
-		"lower": strings.ToLower,
+		"lower":               strings.ToLower,
+		"agentPermissionRole": auth.RoleForAgentPermission,
+		"agentLegacyRole":     auth.RoleForAgent,
 	}
 
 	templates, err := template.New("").Funcs(funcMap).ParseGlob("../web/templates/*.html")
@@ -230,6 +233,28 @@ func TestCreateTask(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusInternalServerError {
 			t.Errorf("createTask with storage error returned wrong status: got %v want %v", status, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("forbidden without action role", func(t *testing.T) {
+		values := map[string]string{
+			"agent_id":  agentID.String(),
+			"task_type": "EXEC_COMMAND",
+			"command":   "ls",
+		}
+		req, err := createMultipartRequest(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req = req.WithContext(auth.WithPrincipal(req.Context(), auth.NewPrincipal("operator", []string{
+			auth.RoleForAgent(agentID),
+		})))
+
+		rr := httptest.NewRecorder()
+		h.createTask(rr, req)
+
+		if status := rr.Code; status != http.StatusForbidden {
+			t.Errorf("createTask without action role returned wrong status: got %v want %v", status, http.StatusForbidden)
 		}
 	})
 }
@@ -432,5 +457,35 @@ func TestRetryNotificationDeliveryRejectsIneligibleStatus(t *testing.T) {
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Fatalf("expected bad request for ineligible retry status, got %v", status)
+	}
+}
+
+func TestListAgentsFiltersByPrincipal(t *testing.T) {
+	h, mockAgentRepo, _, _, _, _, _ := setupTestHandlers(t)
+
+	allowedAgentID := uuid.New()
+	blockedAgentID := uuid.New()
+	mockAgentRepo.EXPECT().ListAgents(gomock.Any()).Return([]*storage.Agent{
+		{ID: allowedAgentID, Hostname: "allowed-agent"},
+		{ID: blockedAgentID, Hostname: "blocked-agent"},
+	}, nil)
+
+	req := httptest.NewRequest("GET", "/agents", nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.NewPrincipal("viewer", []string{
+		auth.RoleForAgent(allowedAgentID),
+	})))
+	rr := httptest.NewRecorder()
+
+	h.listAgents(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("listAgents returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "allowed-agent") {
+		t.Fatalf("expected allowed agent in response, got %q", body)
+	}
+	if strings.Contains(body, "blocked-agent") {
+		t.Fatalf("did not expect blocked agent in response, got %q", body)
 	}
 }

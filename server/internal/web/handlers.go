@@ -1,9 +1,11 @@
 package web
 
 import (
+	"agent-management/server/internal/auth"
 	"agent-management/server/internal/events"
 	"agent-management/server/internal/notifier"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +64,34 @@ type NotificationEventDetailPageData struct {
 	Event         *storage.NotificationEvent
 	Deliveries    []*storage.NotificationDelivery
 	PayloadPretty string
+}
+
+type AccessRoleOption struct {
+	Name        string
+	Description string
+	Group       string
+}
+
+type AccessPermissionOption struct {
+	Key         string
+	Label       string
+	Description string
+}
+
+type AccessUserCard struct {
+	User          *storage.User
+	ActionRoles   []string
+	AgentRoles    []string
+	OtherRoles    []string
+	SelectedRoles map[string]bool
+}
+
+type AccessPageData struct {
+	Users            []*AccessUserCard
+	GlobalRoles      []AccessRoleOption
+	AgentPermissions []AccessPermissionOption
+	Agents           []*storage.Agent
+	Flash            string
 }
 
 // AgentResponse defines the structure for a single agent in the JSON API response.
@@ -125,6 +156,9 @@ func (h *Handlers) sseHandler(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if !h.canStreamEventToPrincipal(r.Context(), event) {
+				continue
+			}
 			fmt.Fprintf(w, "data: %s\n\n", event)
 			flusher.Flush()
 		}
@@ -138,6 +172,10 @@ func (h *Handlers) home(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handlers) logout(w http.ResponseWriter, r *http.Request) {
+	auth.LogoutChallenge(w)
+}
+
 func (h *Handlers) listAgents(w http.ResponseWriter, r *http.Request) {
 	h.logger.Info("Serving agent list page")
 	agents, err := h.storage.Agent.ListAgents(r.Context())
@@ -146,6 +184,7 @@ func (h *Handlers) listAgents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	agents = h.filterVisibleAgents(r.Context(), agents)
 	err = h.templates.ExecuteTemplate(w, "agents.html", agents)
 	if err != nil {
 		h.logger.Error("Failed to execute agents template", "error", err)
@@ -164,11 +203,16 @@ func (h *Handlers) listTasks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.logger.Info("Fetching tasks for specific agent", "agent_id", agentID)
+		if !h.canViewTasks(r.Context(), agentID) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 		tasks, err = h.storage.Task.ListTasksByAgentID(r.Context(), agentID)
 	} else {
 		h.logger.Info("Fetching all tasks")
 		tasks, err = h.storage.Task.ListTasks(r.Context())
 	}
+	tasks = h.filterTasksForPrincipal(r.Context(), tasks)
 
 	if err != nil {
 		h.logger.Error("Failed to list tasks", "error", err)
@@ -183,6 +227,7 @@ func (h *Handlers) listTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	agents = h.filterVisibleAgents(r.Context(), agents)
 	agentNames := make(map[uuid.UUID]string, len(agents))
 	for _, agent := range agents {
 		agentNames[agent.ID] = agent.Hostname
@@ -212,6 +257,10 @@ func (h *Handlers) viewTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Task not found", http.StatusNotFound)
 		return
 	}
+	if !h.canViewTasks(r.Context(), task.AgentID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	result, _ := h.storage.Task.GetTaskResultByTaskID(r.Context(), taskID)
 	logs, _ := h.storage.Log.GetLogsByTaskID(r.Context(), taskID)
 	var notificationEvents []*storage.NotificationEvent
@@ -238,6 +287,7 @@ func (h *Handlers) listNotificationEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	events = h.filterNotificationEventsForPrincipal(r.Context(), events)
 	agents, err := h.storage.Agent.ListAgents(r.Context())
 	if err != nil {
 		h.logger.Error("Failed to list agents for notification page", "error", err)
@@ -245,6 +295,7 @@ func (h *Handlers) listNotificationEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	agents = h.filterVisibleAgents(r.Context(), agents)
 	agentNames := make(map[uuid.UUID]string, len(agents))
 	for _, agent := range agents {
 		agentNames[agent.ID] = agent.Hostname
@@ -289,6 +340,10 @@ func (h *Handlers) viewNotificationEvent(w http.ResponseWriter, r *http.Request)
 	event, err := h.storage.Notification.GetNotificationEventByID(r.Context(), eventID)
 	if err != nil {
 		http.Error(w, "Notification event not found", http.StatusNotFound)
+		return
+	}
+	if !h.canViewNotifications(r.Context(), event.AgentID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -341,6 +396,17 @@ func (h *Handlers) retryNotificationDelivery(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Notification delivery is not eligible for manual retry", http.StatusBadRequest)
 		return
 	}
+	if auth.PrincipalFromContext(r.Context()) != nil {
+		event, err := h.storage.Notification.GetNotificationEventByID(r.Context(), delivery.NotificationEventID)
+		if err != nil {
+			http.Error(w, "Notification event not found", http.StatusNotFound)
+			return
+		}
+		if !h.canViewNotifications(r.Context(), event.AgentID) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+	}
 
 	maxAttempts := delivery.MaxAttempts
 	if delivery.Attempt >= maxAttempts {
@@ -371,6 +437,176 @@ func (h *Handlers) handleRescheduleTask(w http.ResponseWriter, r *http.Request) 
 	h.showRescheduleTaskForm(w, r)
 }
 
+func (h *Handlers) accessPage(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+
+	if err := h.storage.User.EnsureRoles(r.Context(), defaultManagedRoles()); err != nil {
+		h.logger.Error("Failed to ensure managed roles", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	users, err := h.storage.User.ListUsers(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list users", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	agents, err := h.storage.Agent.ListAgents(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list agents for access page", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	pageData := AccessPageData{
+		Users:            buildAccessUserCards(users),
+		GlobalRoles:      buildGlobalRoleOptions(defaultManagedRoles()),
+		AgentPermissions: accessPermissionOptions(),
+		Agents:           agents,
+		Flash:            r.URL.Query().Get("flash"),
+	}
+
+	if err := h.templates.ExecuteTemplate(w, "access.html", pageData); err != nil {
+		h.logger.Error("Failed to execute access template", "error", err)
+	}
+}
+
+func (h *Handlers) createUser(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+	if username == "" || password == "" {
+		http.Redirect(w, r, "/access?flash=Username+and+password+are+required", http.StatusSeeOther)
+		return
+	}
+
+	if err := h.storage.User.CreateUser(r.Context(), username, password); err != nil {
+		h.logger.Error("Failed to create user", "username", username, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+create+user", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=User+created", http.StatusSeeOther)
+}
+
+func (h *Handlers) updateUserPassword(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	username := r.PathValue("username")
+	password := r.FormValue("password")
+	if strings.TrimSpace(password) == "" {
+		http.Redirect(w, r, "/access?flash=Password+cannot+be+empty", http.StatusSeeOther)
+		return
+	}
+
+	if err := h.storage.User.UpdateUserPassword(r.Context(), username, password); err != nil {
+		h.logger.Error("Failed to update user password", "username", username, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+update+password", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Password+updated", http.StatusSeeOther)
+}
+
+func (h *Handlers) updateUserStatus(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	username := r.PathValue("username")
+	isActive := r.FormValue("is_active") == "true"
+	if !isActive {
+		users, err := h.storage.User.ListUsers(r.Context())
+		if err != nil {
+			h.logger.Error("Failed to load users for admin status validation", "error", err)
+			http.Redirect(w, r, "/access?flash=Failed+to+validate+status+change", http.StatusSeeOther)
+			return
+		}
+		if isLastActiveAdmin(users, username) {
+			http.Redirect(w, r, "/access?flash=Cannot+disable+the+last+active+administrator", http.StatusSeeOther)
+			return
+		}
+	}
+
+	if err := h.storage.User.UpdateUserStatus(r.Context(), username, isActive); err != nil {
+		h.logger.Error("Failed to update user status", "username", username, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+update+status", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Status+updated", http.StatusSeeOther)
+}
+
+func (h *Handlers) updateUserRoles(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	username := r.PathValue("username")
+	roleNames := uniqueRoleNames(r.Form["roles"])
+	if !containsAnyRole(roleNames, auth.RoleAdmin, auth.RoleFullAccess) {
+		users, err := h.storage.User.ListUsers(r.Context())
+		if err != nil {
+			h.logger.Error("Failed to load users for admin role validation", "error", err)
+			http.Redirect(w, r, "/access?flash=Failed+to+validate+role+change", http.StatusSeeOther)
+			return
+		}
+		if isLastActiveAdmin(users, username) {
+			http.Redirect(w, r, "/access?flash=Cannot+remove+admin+from+the+last+active+administrator", http.StatusSeeOther)
+			return
+		}
+	}
+
+	rolesToEnsure := make([]*storage.Role, 0, len(roleNames))
+	rolesToEnsure = append(rolesToEnsure, defaultManagedRoles()...)
+	for _, roleName := range roleNames {
+		if strings.HasPrefix(roleName, auth.AgentRolePrefix) {
+			rolesToEnsure = append(rolesToEnsure, &storage.Role{
+				Name:        roleName,
+				Description: "Access to specific agent",
+			})
+		}
+	}
+	if err := h.storage.User.EnsureRoles(r.Context(), rolesToEnsure); err != nil {
+		h.logger.Error("Failed to ensure roles", "username", username, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+prepare+roles", http.StatusSeeOther)
+		return
+	}
+
+	if err := h.storage.User.SetUserRoles(r.Context(), username, roleNames); err != nil {
+		h.logger.Error("Failed to update user roles", "username", username, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+update+roles", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Roles+updated", http.StatusSeeOther)
+}
+
 func (h *Handlers) showRescheduleTaskForm(w http.ResponseWriter, r *http.Request) {
 	taskIDStr := r.PathValue("id")
 	taskID, err := uuid.Parse(taskIDStr)
@@ -381,6 +617,10 @@ func (h *Handlers) showRescheduleTaskForm(w http.ResponseWriter, r *http.Request
 	task, err := h.storage.Task.GetTaskByID(r.Context(), taskID)
 	if err != nil {
 		http.Error(w, "Task not found", http.StatusNotFound)
+		return
+	}
+	if !h.canRescheduleTasks(r.Context(), task.AgentID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -452,6 +692,7 @@ func (h *Handlers) showNewTaskForm(w http.ResponseWriter, r *http.Request, formE
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	agents = h.filterAgentsForTaskCreation(r.Context(), agents)
 
 	tasks, err := h.storage.Task.ListTasks(r.Context())
 	if err != nil {
@@ -459,6 +700,7 @@ func (h *Handlers) showNewTaskForm(w http.ResponseWriter, r *http.Request, formE
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	tasks = h.filterTasksForPrincipal(r.Context(), tasks)
 
 	selectableTasks := make([]struct {
 		ID          string
@@ -519,6 +761,10 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 		h.showNewTaskForm(w, r, fmt.Errorf("task type is required"))
 		return
 	}
+	if !h.canRunTaskType(r.Context(), taskType) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	timeout, _ := strconv.Atoi(r.FormValue("timeout_seconds"))
 	files := r.MultipartForm.File["files"]
 
@@ -558,6 +804,10 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 			h.showNewTaskForm(w, r, fmt.Errorf("invalid agent ID: %s", agentIDStr))
 			return
 		}
+		if !h.canCreateTasks(r.Context(), agentID) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
 
 		task := storage.Task{
 			ID:                  uuid.New(),
@@ -574,6 +824,7 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 			PrerequisiteTaskID:  prerequisiteTaskID,
 			CreatedAt:           time.Now(),
 			UpdatedAt:           time.Now(),
+			CreatedBy:           h.createdByPrincipal(r.Context()),
 		}
 		rawDestinations := strings.Split(strings.TrimSpace(r.FormValue("default_destinations")), ",")
 		defaultDestinations := make([]string, 0, len(rawDestinations))
@@ -676,6 +927,10 @@ func (h *Handlers) AgentMetricsPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Agent Not Found", http.StatusNotFound)
 		return
 	}
+	if !h.canViewMetrics(r.Context(), agent.ID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	since := time.Now().Add(-6 * time.Hour)
 	metrics, _ := h.storage.Metric.GetMetricsByAgentID(r.Context(), agentID, since)
 	chartData, _ := formatDataForChartJS(metrics)
@@ -699,6 +954,10 @@ func (h *Handlers) toggleAgentStatus(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Agent not found", http.StatusNotFound)
 		return
 	}
+	if !h.canToggleAgentStatus(r.Context(), agent.ID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	newStatus := storage.AgentStatusDisconnected
 	if agent.Status != storage.AgentStatusOnline {
 		newStatus = storage.AgentStatusOnline
@@ -715,6 +974,10 @@ func (h *Handlers) deleteAgent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid agent ID", http.StatusBadRequest)
 		return
 	}
+	if !h.canDeleteAgent(r.Context(), agentID) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	h.storage.Agent.DeleteAgent(r.Context(), agentID)
 	http.Redirect(w, r, "/agents", http.StatusSeeOther)
 }
@@ -727,6 +990,7 @@ func (h *Handlers) listAgentsJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	agents = h.filterVisibleAgents(r.Context(), agents)
 	responses := make([]AgentResponse, 0, len(agents))
 	for _, agent := range agents {
 		var lastHeartbeat *time.Time
@@ -750,6 +1014,285 @@ func (h *Handlers) listAgentsJSON(w http.ResponseWriter, r *http.Request) {
 		// The response header might already be written, so we can't send a 500.
 		// The connection will likely be closed by the server.
 	}
+}
+
+func buildAccessUserCards(users []*storage.User) []*AccessUserCard {
+	result := make([]*AccessUserCard, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+
+		card := &AccessUserCard{
+			User:          user,
+			SelectedRoles: make(map[string]bool, len(user.Roles)),
+		}
+		for _, role := range user.Roles {
+			card.SelectedRoles[role] = true
+			switch {
+			case role == auth.RoleAdmin, role == auth.RoleFullAccess:
+				card.OtherRoles = append(card.OtherRoles, role)
+			case strings.HasPrefix(role, auth.ActionRolePrefix):
+				card.ActionRoles = append(card.ActionRoles, role)
+			case strings.HasPrefix(role, auth.AgentRolePrefix):
+				card.AgentRoles = append(card.AgentRoles, role)
+			default:
+				card.OtherRoles = append(card.OtherRoles, role)
+			}
+		}
+		sort.Strings(card.ActionRoles)
+		sort.Strings(card.AgentRoles)
+		sort.Strings(card.OtherRoles)
+		result = append(result, card)
+	}
+
+	return result
+}
+
+func buildGlobalRoleOptions(roles []*storage.Role) []AccessRoleOption {
+	options := make([]AccessRoleOption, 0, len(roles))
+	for _, role := range roles {
+		if role == nil || strings.HasPrefix(role.Name, auth.AgentRolePrefix) {
+			continue
+		}
+		options = append(options, AccessRoleOption{
+			Name:        role.Name,
+			Description: role.Description,
+			Group:       classifyRoleGroup(role.Name),
+		})
+	}
+	sort.Slice(options, func(i, j int) bool {
+		if options[i].Group == options[j].Group {
+			return options[i].Name < options[j].Name
+		}
+		return options[i].Group < options[j].Group
+	})
+	return options
+}
+
+func accessPermissionOptions() []AccessPermissionOption {
+	return []AccessPermissionOption{
+		{Key: auth.AgentPermissionView, Label: "View", Description: "See the agent on the main page"},
+		{Key: auth.AgentPermissionMetricsView, Label: "Metrics", Description: "Open metrics for the agent"},
+		{Key: auth.AgentPermissionTaskView, Label: "Tasks", Description: "View tasks and task details"},
+		{Key: auth.AgentPermissionTaskCreate, Label: "Create", Description: "Create tasks for the agent"},
+		{Key: auth.AgentPermissionTaskReschedule, Label: "Reschedule", Description: "Change schedule of existing tasks"},
+		{Key: auth.AgentPermissionNotificationView, Label: "Alerts", Description: "View notifications and retries"},
+		{Key: auth.AgentPermissionStatusToggle, Label: "Toggle", Description: "Toggle agent status"},
+		{Key: auth.AgentPermissionDelete, Label: "Delete", Description: "Delete the agent"},
+	}
+}
+
+func classifyRoleGroup(roleName string) string {
+	switch {
+	case roleName == auth.RoleAdmin, roleName == auth.RoleFullAccess:
+		return "Core"
+	case strings.HasPrefix(roleName, auth.ActionRolePrefix):
+		return "Actions"
+	case strings.HasPrefix(roleName, auth.AgentRolePrefix):
+		return "Agents"
+	default:
+		return "Other"
+	}
+}
+
+func uniqueRoleNames(roleNames []string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(roleNames))
+	for _, roleName := range roleNames {
+		roleName = strings.TrimSpace(strings.ToLower(roleName))
+		if roleName == "" || seen[roleName] {
+			continue
+		}
+		seen[roleName] = true
+		result = append(result, roleName)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func containsAnyRole(roleNames []string, expected ...string) bool {
+	for _, roleName := range roleNames {
+		for _, candidate := range expected {
+			if roleName == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isLastActiveAdmin(users []*storage.User, username string) bool {
+	activeAdmins := 0
+	targetIsActiveAdmin := false
+	for _, user := range users {
+		if user == nil || !user.IsActive {
+			continue
+		}
+		isAdmin := false
+		for _, role := range user.Roles {
+			if role == auth.RoleAdmin || role == auth.RoleFullAccess {
+				isAdmin = true
+				break
+			}
+		}
+		if !isAdmin {
+			continue
+		}
+		activeAdmins++
+		if user.Username == username {
+			targetIsActiveAdmin = true
+		}
+	}
+	return targetIsActiveAdmin && activeAdmins <= 1
+}
+
+func defaultManagedRoles() []*storage.Role {
+	return []*storage.Role{
+		{Name: auth.RoleAdmin, Description: "Full access to all agents and actions"},
+		{Name: auth.RoleFullAccess, Description: "Full access to all agents and actions without the admin label"},
+		{Name: "action.exec_command", Description: "Allows creating and managing EXEC_COMMAND tasks"},
+		{Name: "action.exec_python_script", Description: "Allows creating and managing EXEC_PYTHON_SCRIPT tasks"},
+		{Name: "action.fetch_file", Description: "Allows creating and managing FETCH_FILE tasks"},
+		{Name: "action.push_file", Description: "Allows creating and managing PUSH_FILE tasks"},
+		{Name: "action.agent_update", Description: "Allows creating and managing AGENT_UPDATE tasks"},
+	}
+}
+
+func (h *Handlers) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	principal := auth.PrincipalFromContext(r.Context())
+	if principal == nil || !principal.IsAdmin() {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
+func (h *Handlers) createdByPrincipal(ctx context.Context) sql.NullString {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.Username == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: principal.Username, Valid: true}
+}
+
+func (h *Handlers) canSeeAgent(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAnyAgentPermission(agentID)
+}
+
+func (h *Handlers) canRunTaskType(ctx context.Context, taskType storage.TaskType) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.CanRunTaskType(taskType)
+}
+
+func (h *Handlers) canViewMetrics(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionMetricsView)
+}
+
+func (h *Handlers) canViewTasks(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionTaskView)
+}
+
+func (h *Handlers) canCreateTasks(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionTaskCreate)
+}
+
+func (h *Handlers) canRescheduleTasks(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionTaskReschedule)
+}
+
+func (h *Handlers) canViewNotifications(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionNotificationView)
+}
+
+func (h *Handlers) canToggleAgentStatus(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionStatusToggle)
+}
+
+func (h *Handlers) canDeleteAgent(ctx context.Context, agentID uuid.UUID) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionDelete)
+}
+
+func (h *Handlers) filterVisibleAgents(ctx context.Context, agents []*storage.Agent) []*storage.Agent {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.IsAdmin() {
+		return agents
+	}
+
+	filtered := make([]*storage.Agent, 0, len(agents))
+	for _, agent := range agents {
+		if agent != nil && principal.HasAnyAgentPermission(agent.ID) {
+			filtered = append(filtered, agent)
+		}
+	}
+	return filtered
+}
+
+func (h *Handlers) filterAgentsForTaskCreation(ctx context.Context, agents []*storage.Agent) []*storage.Agent {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.IsAdmin() {
+		return agents
+	}
+
+	filtered := make([]*storage.Agent, 0, len(agents))
+	for _, agent := range agents {
+		if agent != nil && principal.HasAgentPermission(agent.ID, auth.AgentPermissionTaskCreate) {
+			filtered = append(filtered, agent)
+		}
+	}
+	return filtered
+}
+
+func (h *Handlers) filterTasksForPrincipal(ctx context.Context, tasks []*storage.Task) []*storage.Task {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.IsAdmin() {
+		return tasks
+	}
+
+	filtered := make([]*storage.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task != nil && principal.HasAgentPermission(task.AgentID, auth.AgentPermissionTaskView) {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+func (h *Handlers) filterNotificationEventsForPrincipal(ctx context.Context, events []*storage.NotificationEvent) []*storage.NotificationEvent {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.IsAdmin() {
+		return events
+	}
+
+	filtered := make([]*storage.NotificationEvent, 0, len(events))
+	for _, event := range events {
+		if event != nil && principal.HasAgentPermission(event.AgentID, auth.AgentPermissionNotificationView) {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
+func (h *Handlers) canStreamEventToPrincipal(ctx context.Context, payload []byte) bool {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.IsAdmin() {
+		return true
+	}
+
+	var task storage.Task
+	if err := json.Unmarshal(payload, &task); err != nil {
+		return false
+	}
+
+	return principal.HasAgentPermission(task.AgentID, auth.AgentPermissionTaskView)
 }
 
 func formatDataForChartJS(metrics []*storage.AgentMetric) (string, error) {

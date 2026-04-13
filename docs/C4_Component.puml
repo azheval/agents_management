@@ -1,0 +1,39 @@
+@startuml C4_Component
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+title Web Server Component Diagram
+
+ContainerDb(database, "Database", "PostgreSQL", "Stores agents, tasks, logs, results, users, roles and assignments.")
+Container(agent, "Agent", "Go", "Executes tasks.")
+
+System_Boundary(c1, "Web Server") {
+    Component(web_handlers, "Web Handlers", "Go package", "Handle HTTP requests from user (UI) and apply permission checks.")
+    Component(auth_rbac, "Authentication & RBAC", "Go package", "Authenticates users and evaluates global and per-agent permissions.")
+    Component(access_ui, "User & Role Management", "Go package", "Provides UI for managing users, global roles and agent permission matrix.")
+    Component(grpc_server, "gRPC Server", "Go package", "Accepts connections and results from agents.")
+    Component(scheduler, "Scheduler", "Go package", "Handles delayed and recurring tasks.")
+    Component(storage, "Storage (Repository)", "Go package", "Data access layer (DAL).")
+    Component(notifier, "Notifier", "Go package", "Sends notifications.")
+}
+
+System_Ext(telegram, "Telegram API", "External notification system.")
+
+Rel(web_handlers, auth_rbac, "Authenticates users and authorizes requests")
+Rel(web_handlers, access_ui, "Renders access management pages")
+Rel(web_handlers, storage, "Creates and reads data")
+Rel(access_ui, auth_rbac, "Uses permission model")
+Rel(access_ui, storage, "Manages users, roles and assignments")
+Rel(auth_rbac, storage, "Loads users, roles and assignments")
+Rel(grpc_server, storage, "Updates statuses, saves results")
+Rel(scheduler, storage, "Searches for tasks to execute")
+
+Rel(scheduler, grpc_server, "Queues tasks for execution")
+
+Rel(storage, database, "Executes SQL queries")
+
+Rel_Neighbor(grpc_server, agent, "Interacts with")
+
+Rel(grpc_server, notifier, "Initiates notification sending")
+Rel(notifier, telegram, "Sends notification", "HTTPS")
+
+@enduml

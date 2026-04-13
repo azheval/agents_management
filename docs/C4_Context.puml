@@ -1,0 +1,16 @@
+@startuml C4_Context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+title Agent Management System Context Diagram
+
+Person(admin, "System Administrator", "Configures the platform, users and access policies.")
+Person(operator, "Operator", "Authenticated user with permissions limited by roles and agent access matrix.")
+System(agent_system, "Agent Management System", "System for executing tasks on remote machines with authentication and role-based access control.")
+
+System_Ext(telegram, "Telegram API", "Messaging platform.")
+
+Rel(admin, agent_system, "Manages agents, users, roles and tasks", "Uses web interface")
+Rel(operator, agent_system, "Works with agents and tasks according to assigned permissions", "Uses web interface")
+Rel(agent_system, telegram, "Sends task status notifications")
+
+@enduml

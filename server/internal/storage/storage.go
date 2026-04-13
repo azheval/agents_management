@@ -67,6 +67,19 @@ type NotificationRepository interface {
 	ScheduleNotificationDeliveryRetry(ctx context.Context, id uuid.UUID, maxAttempts int32, nextRetryAt time.Time) error
 }
 
+// UserRepository defines access to server operator accounts and their roles.
+type UserRepository interface {
+	AuthenticateUser(ctx context.Context, username, password string) (*User, error)
+	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	ListUsers(ctx context.Context) ([]*User, error)
+	ListRoles(ctx context.Context) ([]*Role, error)
+	CreateUser(ctx context.Context, username, password string) error
+	UpdateUserPassword(ctx context.Context, username, password string) error
+	UpdateUserStatus(ctx context.Context, username string, isActive bool) error
+	SetUserRoles(ctx context.Context, username string, roleNames []string) error
+	EnsureRoles(ctx context.Context, roles []*Role) error
+}
+
 // Storage is a container for all repositories.
 type Storage struct {
 	Agent        AgentRepository
@@ -74,15 +87,17 @@ type Storage struct {
 	Log          LogRepository
 	Metric       MetricRepository
 	Notification NotificationRepository
+	User         UserRepository
 }
 
 // NewStorage creates a new storage container.
-func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogRepository, metricRepo MetricRepository, notificationRepo NotificationRepository) *Storage {
+func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogRepository, metricRepo MetricRepository, notificationRepo NotificationRepository, userRepo UserRepository) *Storage {
 	return &Storage{
 		Agent:        agentRepo,
 		Task:         taskRepo,
 		Log:          logRepo,
 		Metric:       metricRepo,
 		Notification: notificationRepo,
+		User:         userRepo,
 	}
 }

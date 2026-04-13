@@ -1,0 +1,25 @@
+@startuml C4_Container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+title Agent Management System Container Diagram
+
+Person(admin, "System Administrator")
+Person(operator, "Operator")
+
+System_Boundary(c1, "Agent Management System") {
+    Container(web_server, "Web Server", "Go, net/http", "Provides UI, access management, authentication, authorization and gRPC interface for agents.")
+    ContainerDb(database, "Database", "PostgreSQL", "Stores agent states, tasks, logs, results, users, roles and role assignments.")
+}
+
+Container(agent, "Agent", "Go, gRPC", "Executes tasks on managed machine. Deployed on each machine.")
+
+System_Ext(telegram, "Telegram API", "Messaging platform.")
+
+Rel(admin, web_server, "Uses", "HTTPS")
+Rel(operator, web_server, "Uses according to assigned permissions", "HTTPS")
+Rel(web_server, database, "Reads and writes", "SQL, TCP/IP")
+Rel(web_server, agent, "Sends tasks", "gRPC")
+Rel(agent, web_server, "Sends results and logs", "gRPC")
+Rel(web_server, telegram, "Sends notifications", "HTTPS")
+
+@enduml

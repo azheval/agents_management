@@ -188,3 +188,22 @@ type NotificationDelivery struct {
 	NextRetryAt          sql.NullTime               `db:"next_retry_at"`
 	CreatedAt            time.Time                  `db:"created_at"`
 }
+
+// User corresponds to the users table used for authenticating server operators.
+type User struct {
+	ID           uuid.UUID      `db:"id"`
+	Username     string         `db:"username"`
+	PasswordHash string         `db:"password_hash"`
+	IsActive     bool           `db:"is_active"`
+	Roles        pq.StringArray `db:"roles"`
+	CreatedAt    time.Time      `db:"created_at"`
+	UpdatedAt    time.Time      `db:"updated_at"`
+}
+
+// Role corresponds to the roles table.
+type Role struct {
+	ID          uuid.UUID `db:"id"`
+	Name        string    `db:"name"`
+	Description string    `db:"description"`
+	CreatedAt   time.Time `db:"created_at"`
+}

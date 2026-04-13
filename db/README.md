@@ -29,7 +29,8 @@ This directory contains all database migration files for the agent management sy
 8. `008_add_scheduling_to_tasks.sql` - Adds scheduling columns to tasks
 9. `009_add_notification_storage.sql` - Adds notification_events and notification_deliveries tables
 10. `010_add_task_notification_settings.sql` - Adds task-level alert pipeline settings
-11. `001_full_schema.sql` - Consolidated schema for fresh installations
+11. `011_add_user_auth.sql` - Adds users, roles, and user_roles tables for RBAC
+12. `001_full_schema.sql` - Consolidated schema for fresh installations
 
 ## Server Startup Behavior
 

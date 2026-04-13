@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -498,4 +499,195 @@ func (r *PostgresNotificationRepository) ScheduleNotificationDeliveryRetry(ctx c
 	`
 	_, err := r.db.ExecContext(ctx, query, maxAttempts, nextRetryAt, id)
 	return err
+}
+
+// PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
+type PostgresUserRepository struct {
+	db *sqlx.DB
+}
+
+// NewPostgresUserRepository creates a new repository for users.
+func NewPostgresUserRepository(db *sqlx.DB) *PostgresUserRepository {
+	return &PostgresUserRepository{db: db}
+}
+
+func (r *PostgresUserRepository) AuthenticateUser(ctx context.Context, username, password string) (*User, error) {
+	var user User
+	query := `
+		SELECT
+			u.id,
+			u.username,
+			u.password_hash,
+			u.is_active,
+			COALESCE(array_remove(array_agg(role.name), NULL), ARRAY[]::TEXT[]) AS roles,
+			u.created_at,
+			u.updated_at
+		FROM users u
+		LEFT JOIN user_roles ur ON ur.user_id = u.id
+		LEFT JOIN roles role ON role.id = ur.role_id
+		WHERE u.username = $1
+		  AND u.is_active = TRUE
+		  AND u.password_hash = crypt($2, u.password_hash)
+		GROUP BY u.id, u.username, u.password_hash, u.is_active, u.created_at, u.updated_at
+	`
+	err := r.db.GetContext(ctx, &user, query, username, password)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *PostgresUserRepository) GetUserByUsername(ctx context.Context, username string) (*User, error) {
+	var user User
+	query := `
+		SELECT
+			u.id,
+			u.username,
+			u.password_hash,
+			u.is_active,
+			COALESCE(array_remove(array_agg(role.name), NULL), ARRAY[]::TEXT[]) AS roles,
+			u.created_at,
+			u.updated_at
+		FROM users u
+		LEFT JOIN user_roles ur ON ur.user_id = u.id
+		LEFT JOIN roles role ON role.id = ur.role_id
+		WHERE u.username = $1
+		GROUP BY u.id, u.username, u.password_hash, u.is_active, u.created_at, u.updated_at
+	`
+	err := r.db.GetContext(ctx, &user, query, username)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *PostgresUserRepository) ListUsers(ctx context.Context) ([]*User, error) {
+	var users []*User
+	query := `
+		SELECT
+			u.id,
+			u.username,
+			u.password_hash,
+			u.is_active,
+			COALESCE(array_remove(array_agg(role.name), NULL), ARRAY[]::TEXT[]) AS roles,
+			u.created_at,
+			u.updated_at
+		FROM users u
+		LEFT JOIN user_roles ur ON ur.user_id = u.id
+		LEFT JOIN roles role ON role.id = ur.role_id
+		GROUP BY u.id, u.username, u.password_hash, u.is_active, u.created_at, u.updated_at
+		ORDER BY u.username ASC
+	`
+	err := r.db.SelectContext(ctx, &users, query)
+	return users, err
+}
+
+func (r *PostgresUserRepository) ListRoles(ctx context.Context) ([]*Role, error) {
+	var roles []*Role
+	query := "SELECT id, name, description, created_at FROM roles ORDER BY name ASC"
+	err := r.db.SelectContext(ctx, &roles, query)
+	return roles, err
+}
+
+func (r *PostgresUserRepository) CreateUser(ctx context.Context, username, password string) error {
+	query := `
+		INSERT INTO users (username, password_hash, is_active)
+		VALUES ($1, crypt($2, gen_salt('bf')), TRUE)
+	`
+	_, err := r.db.ExecContext(ctx, query, username, password)
+	return err
+}
+
+func (r *PostgresUserRepository) UpdateUserPassword(ctx context.Context, username, password string) error {
+	query := `
+		UPDATE users
+		SET password_hash = crypt($2, gen_salt('bf')),
+		    updated_at = NOW()
+		WHERE username = $1
+	`
+	_, err := r.db.ExecContext(ctx, query, username, password)
+	return err
+}
+
+func (r *PostgresUserRepository) UpdateUserStatus(ctx context.Context, username string, isActive bool) error {
+	query := `
+		UPDATE users
+		SET is_active = $2,
+		    updated_at = NOW()
+		WHERE username = $1
+	`
+	_, err := r.db.ExecContext(ctx, query, username, isActive)
+	return err
+}
+
+func (r *PostgresUserRepository) EnsureRoles(ctx context.Context, roles []*Role) error {
+	if len(roles) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	query := `
+		INSERT INTO roles (name, description)
+		VALUES ($1, $2)
+		ON CONFLICT (name) DO UPDATE
+		SET description = CASE
+			WHEN roles.description = '' AND EXCLUDED.description <> '' THEN EXCLUDED.description
+			ELSE roles.description
+		END
+	`
+	for _, role := range roles {
+		if role == nil || strings.TrimSpace(role.Name) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, query, role.Name, role.Description); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (r *PostgresUserRepository) SetUserRoles(ctx context.Context, username string, roleNames []string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var userID uuid.UUID
+	if err := tx.GetContext(ctx, &userID, "SELECT id FROM users WHERE username = $1", username); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, "DELETE FROM user_roles WHERE user_id = $1", userID); err != nil {
+		return err
+	}
+
+	insertQuery := `
+		INSERT INTO user_roles (user_id, role_id)
+		SELECT $1, id
+		FROM roles
+		WHERE name = $2
+		ON CONFLICT (user_id, role_id) DO NOTHING
+	`
+	for _, roleName := range roleNames {
+		roleName = strings.TrimSpace(roleName)
+		if roleName == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, insertQuery, userID, roleName); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, "UPDATE users SET updated_at = NOW() WHERE id = $1", userID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }

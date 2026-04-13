@@ -20,6 +20,7 @@ Distributed task management system with centralized server and distributed agent
 - Real-time monitoring and logging
 - Scheduling capabilities
 - Metrics collection
+- Role-based access model for server users
 
 ![C4 Container](/docs/C4_Container.svg)
 
@@ -88,6 +89,43 @@ make run-agent
 ## Dependencies
 
 This project uses Go modules for dependency management. All dependencies are listed in `go.mod` and will be downloaded automatically during build. No vendor directory is required for building.
+
+## Access Model
+
+The web server uses HTTP Basic Auth backed by the PostgreSQL database.
+
+Users and roles are stored in:
+
+- `users`
+- `roles`
+- `user_roles`
+
+Available roles:
+
+- `admin` - full access to all server operations and all agents
+- `full_access` - same effective permissions as `admin`
+- `action.exec_command`
+- `action.exec_python_script`
+- `action.fetch_file`
+- `action.push_file`
+- `action.agent_update`
+- `agent:<uuid>` - legacy broad access to one specific agent
+- `agent:<uuid>:view`
+- `agent:<uuid>:metrics_view`
+- `agent:<uuid>:task_view`
+- `agent:<uuid>:task_create`
+- `agent:<uuid>:task_reschedule`
+- `agent:<uuid>:notification_view`
+- `agent:<uuid>:status_toggle`
+- `agent:<uuid>:delete`
+
+Migration `011_add_user_auth.sql` seeds:
+
+- base action roles
+- `admin` role
+- initial user `admin` with password `admin`
+
+Change the default admin password immediately after deployment.
 
 ## Project Structure
 

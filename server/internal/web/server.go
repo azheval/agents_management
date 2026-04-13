@@ -1,6 +1,7 @@
 package web
 
 import (
+	"agent-management/server/internal/auth"
 	"agent-management/server/internal/events"
 	"agent-management/server/internal/notifier"
 	"html/template"
@@ -14,7 +15,9 @@ import (
 
 // Define the function map.
 var funcMap = template.FuncMap{
-	"lower": strings.ToLower,
+	"lower":               strings.ToLower,
+	"agentPermissionRole": auth.RoleForAgentPermission,
+	"agentLegacyRole":     auth.RoleForAgent,
 }
 
 // StartWebServer initializes and starts the web server.
@@ -36,9 +39,11 @@ func StartWebServer(cfg config.WebserverConfig, logger *slog.Logger, storage *st
 	mux.Handle("/static/", http.StripPrefix("/static/", fs))
 
 	handlers := NewHandlers(webLogger, storage, templates, notifier, broker)
+	protectedMux := auth.Middleware(auth.NewAuthenticator(storage.User), mux)
 
 	// Register routes
 	mux.HandleFunc("/", handlers.listAgents)
+	mux.HandleFunc("GET /logout", handlers.logout)
 	mux.HandleFunc("/agents", handlers.listAgents)
 	mux.HandleFunc("GET /agents/{id}/metrics", handlers.AgentMetricsPage)
 	mux.HandleFunc("/tasks", handlers.listTasks)
@@ -47,6 +52,11 @@ func StartWebServer(cfg config.WebserverConfig, logger *slog.Logger, storage *st
 	mux.HandleFunc("/notifications", handlers.listNotificationEvents)
 	mux.HandleFunc("GET /notifications/{id}", handlers.viewNotificationEvent)
 	mux.HandleFunc("POST /notifications/deliveries/{id}/retry", handlers.retryNotificationDelivery)
+	mux.HandleFunc("GET /access", handlers.accessPage)
+	mux.HandleFunc("POST /access/users", handlers.createUser)
+	mux.HandleFunc("POST /access/users/{username}/password", handlers.updateUserPassword)
+	mux.HandleFunc("POST /access/users/{username}/status", handlers.updateUserStatus)
+	mux.HandleFunc("POST /access/users/{username}/roles", handlers.updateUserRoles)
 	mux.HandleFunc("GET /task/{id}/reschedule", handlers.handleRescheduleTask)
 	mux.HandleFunc("POST /task/{id}/reschedule", handlers.handleRescheduleTask)
 	mux.HandleFunc("/agent/toggle_status", handlers.toggleAgentStatus)
@@ -54,7 +64,7 @@ func StartWebServer(cfg config.WebserverConfig, logger *slog.Logger, storage *st
 	mux.HandleFunc("/events", handlers.sseHandler)
 
 	go func() {
-		if err := http.ListenAndServe(cfg.ListenAddress, mux); err != nil {
+		if err := http.ListenAndServe(cfg.ListenAddress, protectedMux); err != nil {
 			webLogger.Error("Web server failed", "error", err)
 		}
 	}()
