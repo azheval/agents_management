@@ -1,4 +1,4 @@
-.PHONY: all proto tidy build run-server run-agent
+.PHONY: all proto tidy build build-server build-server-linux build-agent-windows build-agent-linux run-server run-agent
 
 all: build
 
@@ -14,12 +14,17 @@ tidy:
 CONFIG_SRC ?= server/config.json
 CONFIG_DST ?= build/config.json
 
-build: tidy build-server build-agent-windows
+build: tidy build-server build-server-linux build-agent-windows
 
 build-server:
 	mkdir -p build
 	cp $(CONFIG_SRC) $(CONFIG_DST)
 	go build -o build/server.exe ./server/cmd/server
+
+build-server-linux:
+	mkdir -p build
+	cp $(CONFIG_SRC) $(CONFIG_DST)
+	GOOS=linux GOARCH=amd64 go build -o build/server ./server/cmd/server
 
 build-agent-windows:
 	mkdir -p build
