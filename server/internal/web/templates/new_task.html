@@ -158,6 +158,17 @@
                         <!-- EXEC_COMMAND -->
                         <div id="param_EXEC_COMMAND" class="task-param hidden">
                             <div>
+                                <label for="exec_policy_id" class="block text-sm font-medium text-gray-700">Saved Policy</label>
+                                <select name="exec_policy_id" id="exec_policy_id" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">Legacy manual command</option>
+                                </select>
+                                <p class="mt-1 text-xs text-gray-500">Choose a saved policy to resolve command and arguments per agent through its binding.</p>
+                            </div>
+                            <div id="exec-policy-params" class="space-y-4"></div>
+                            <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                If a saved policy is selected, the manual command fields below are ignored.
+                            </div>
+                            <div>
                                 <label for="command" class="block text-sm font-medium text-gray-700">Command</label>
                                 <input type="text" name="command" id="command" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                             </div>
@@ -278,11 +289,74 @@
     <script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script>
+        const execPolicies = {{.ExecPoliciesJSON}};
         const fileStore = {
             EXEC_PYTHON_SCRIPT: [],
             PUSH_FILE: [],
             AGENT_UPDATE: []
         };
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function populateExecPolicySelect() {
+            const select = document.getElementById('exec_policy_id');
+            if (!select) return;
+            execPolicies.forEach(policy => {
+                const option = document.createElement('option');
+                option.value = policy.id;
+                option.textContent = policy.name + (policy.description ? ` - ${policy.description}` : '');
+                select.appendChild(option);
+            });
+        }
+
+        function renderExecPolicyParams() {
+            const select = document.getElementById('exec_policy_id');
+            const container = document.getElementById('exec-policy-params');
+            if (!select || !container) return;
+
+            const policy = execPolicies.find(item => item.id === select.value);
+            container.innerHTML = '';
+            if (!policy) {
+                return;
+            }
+
+            (policy.parameters || []).forEach(param => {
+                if (!param.editable) {
+                    return;
+                }
+                const wrapper = document.createElement('div');
+                const allowedValues = Array.isArray(param.allowed_values) ? param.allowed_values : [];
+                const label = escapeHtml(param.label || param.name);
+                const required = param.required ? 'required' : '';
+                const placeholder = param.default_value ? ` placeholder="${escapeHtml(param.default_value)}"` : '';
+                if (allowedValues.length > 0) {
+                    const options = ['<option value="">-- Select --</option>'].concat(
+                        allowedValues.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+                    ).join('');
+                    wrapper.innerHTML = `
+                        <label class="block text-sm font-medium text-gray-700">${label}</label>
+                        <select name="exec_policy_param_${escapeHtml(param.name)}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500" ${required}>
+                            ${options}
+                        </select>
+                    `;
+                } else {
+                    const inputType = param.secret ? 'password' : (param.type || 'text');
+                    const pattern = param.validation_regex ? ` pattern="${escapeHtml(param.validation_regex)}"` : '';
+                    wrapper.innerHTML = `
+                        <label class="block text-sm font-medium text-gray-700">${label}</label>
+                        <input type="${escapeHtml(inputType)}" name="exec_policy_param_${escapeHtml(param.name)}" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500" ${required}${placeholder}${pattern}>
+                    `;
+                }
+                container.appendChild(wrapper);
+            });
+        }
         
         function formatBytes(bytes, decimals = 2) {
             if (bytes === 0) return '0 Bytes';
@@ -413,6 +487,7 @@
                     selectedParamDiv.querySelectorAll('input, select, textarea').forEach(input => input.disabled = false);
                 }
             }
+            renderExecPolicyParams();
             
             // Handle Scheduling parameters
             const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
@@ -478,6 +553,8 @@
             setupFileUploader('EXEC_PYTHON_SCRIPT');
             setupFileUploader('PUSH_FILE');
             setupFileUploader('AGENT_UPDATE');
+            populateExecPolicySelect();
+            document.getElementById('exec_policy_id').addEventListener('change', renderExecPolicyParams);
 
             updateForm();
 

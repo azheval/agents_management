@@ -61,6 +61,14 @@ func (s *StorageTestSuite) SetupSuite() {
 	if _, err := s.db.Exec(string(migration010)); err != nil {
 		log.Fatalf("failed to apply task notification settings migration: %v", err)
 	}
+
+	migration012, err := os.ReadFile("../../../db/migrations/012_add_exec_command_policies.sql")
+	if err != nil {
+		log.Fatalf("failed to read exec policy migration: %v", err)
+	}
+	if _, err := s.db.Exec(string(migration012)); err != nil {
+		log.Fatalf("failed to apply exec policy migration: %v", err)
+	}
 }
 
 // TearDownSuite runs once after the entire test suite

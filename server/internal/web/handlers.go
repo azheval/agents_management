@@ -27,10 +27,11 @@ import (
 )
 
 type TaskDetailPageData struct {
-	Task               *storage.Task
-	Result             *storage.TaskResult
-	Logs               []*storage.Log
-	NotificationEvents []*storage.NotificationEvent
+	Task                      *storage.Task
+	Result                    *storage.TaskResult
+	Logs                      []*storage.Log
+	NotificationEvents        []*storage.NotificationEvent
+	CanViewExecCommandDetails bool
 }
 
 type NewTaskPageData struct {
@@ -39,7 +40,8 @@ type NewTaskPageData struct {
 		ID          string
 		Description string
 	}
-	Error string
+	ExecPoliciesJSON template.JS
+	Error            string
 }
 
 type AgentMetricsPageData struct {
@@ -82,16 +84,33 @@ type AccessUserCard struct {
 	User          *storage.User
 	ActionRoles   []string
 	AgentRoles    []string
+	PolicyRoles   []string
 	OtherRoles    []string
 	SelectedRoles map[string]bool
 }
 
 type AccessPageData struct {
-	Users            []*AccessUserCard
-	GlobalRoles      []AccessRoleOption
-	AgentPermissions []AccessPermissionOption
-	Agents           []*storage.Agent
-	Flash            string
+	Users                 []*AccessUserCard
+	GlobalRoles           []AccessRoleOption
+	AgentPermissions      []AccessPermissionOption
+	PolicyPermissions     []AccessPermissionOption
+	Agents                []*storage.Agent
+	ExecPolicies          []*ExecPolicyCard
+	ExecPolicyPresetsJSON template.JS
+	ImportReport          *AccessImportReport
+	Flash                 string
+}
+
+type AccessImportReport struct {
+	Summary string
+	Items   []AccessImportReportItem
+}
+
+type AccessImportReportItem struct {
+	Level   string
+	Scope   string
+	Name    string
+	Message string
 }
 
 // AgentResponse defines the structure for a single agent in the JSON API response.
@@ -267,7 +286,13 @@ func (h *Handlers) viewTask(w http.ResponseWriter, r *http.Request) {
 	if h.storage.Notification != nil {
 		notificationEvents, _ = h.storage.Notification.ListNotificationEventsByTaskID(r.Context(), taskID)
 	}
-	pageData := TaskDetailPageData{Task: task, Result: result, Logs: logs, NotificationEvents: notificationEvents}
+	pageData := TaskDetailPageData{
+		Task:                      task,
+		Result:                    result,
+		Logs:                      logs,
+		NotificationEvents:        notificationEvents,
+		CanViewExecCommandDetails: h.canViewExecCommandDetails(r.Context(), task),
+	}
 	err = h.templates.ExecuteTemplate(w, "task.html", pageData)
 	if err != nil {
 		h.logger.Error("Failed to execute task template", "error", err)
@@ -442,6 +467,11 @@ func (h *Handlers) accessPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.renderAccessPage(w, r, r.URL.Query().Get("flash"), nil)
+}
+
+func (h *Handlers) renderAccessPage(w http.ResponseWriter, r *http.Request, flash string, importReport *AccessImportReport) {
+
 	if err := h.storage.User.EnsureRoles(r.Context(), defaultManagedRoles()); err != nil {
 		h.logger.Error("Failed to ensure managed roles", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
@@ -462,12 +492,38 @@ func (h *Handlers) accessPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var execPolicyCards []*ExecPolicyCard
+	if h.storage.ExecPolicy != nil {
+		policies, err := h.storage.ExecPolicy.ListExecCommandPolicies(r.Context())
+		if err != nil {
+			h.logger.Error("Failed to list exec policies for access page", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		bindings, err := h.storage.ExecPolicy.ListExecCommandPolicyBindings(r.Context())
+		if err != nil {
+			h.logger.Error("Failed to list exec policy bindings for access page", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		execPolicyCards, err = h.buildExecPolicyCards(r.Context(), policies, bindings, agents)
+		if err != nil {
+			h.logger.Error("Failed to build exec policy cards", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	pageData := AccessPageData{
-		Users:            buildAccessUserCards(users),
-		GlobalRoles:      buildGlobalRoleOptions(defaultManagedRoles()),
-		AgentPermissions: accessPermissionOptions(),
-		Agents:           agents,
-		Flash:            r.URL.Query().Get("flash"),
+		Users:                 buildAccessUserCards(users),
+		GlobalRoles:           buildGlobalRoleOptions(defaultManagedRoles()),
+		AgentPermissions:      accessPermissionOptions(),
+		PolicyPermissions:     execPolicyPermissionOptions(),
+		Agents:                agents,
+		ExecPolicies:          execPolicyCards,
+		ExecPolicyPresetsJSON: mustMarshalTemplateJS(execPolicyPresets()),
+		ImportReport:          importReport,
+		Flash:                 flash,
 	}
 
 	if err := h.templates.ExecuteTemplate(w, "access.html", pageData); err != nil {
@@ -590,6 +646,13 @@ func (h *Handlers) updateUserRoles(w http.ResponseWriter, r *http.Request) {
 				Name:        roleName,
 				Description: "Access to specific agent",
 			})
+			continue
+		}
+		if strings.HasPrefix(roleName, auth.PolicyRolePrefix) {
+			rolesToEnsure = append(rolesToEnsure, &storage.Role{
+				Name:        roleName,
+				Description: "Access to specific EXEC_COMMAND policy",
+			})
 		}
 	}
 	if err := h.storage.User.EnsureRoles(r.Context(), rolesToEnsure); err != nil {
@@ -605,6 +668,517 @@ func (h *Handlers) updateUserRoles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, "/access?flash=Roles+updated", http.StatusSeeOther)
+}
+
+func (h *Handlers) createExecPolicy(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	name := strings.TrimSpace(r.FormValue("name"))
+	commandTemplate := strings.TrimSpace(r.FormValue("command_template"))
+	if name == "" || commandTemplate == "" {
+		http.Redirect(w, r, "/access?flash=Policy+name+and+command+template+are+required", http.StatusSeeOther)
+		return
+	}
+
+	parameterSchema := strings.TrimSpace(r.FormValue("parameter_schema"))
+	if parameterSchema == "" {
+		parameterSchema = "[]"
+	}
+	if _, err := parseExecPolicyParameterSchema([]byte(parameterSchema)); err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+parameter+schema+JSON", http.StatusSeeOther)
+		return
+	}
+
+	policy := &storage.ExecCommandPolicy{
+		ID:              uuid.New(),
+		Name:            name,
+		Description:     strings.TrimSpace(r.FormValue("description")),
+		CommandTemplate: commandTemplate,
+		ArgsTemplate:    normalizeExecTemplateArgs(r.FormValue("args_template")),
+		ParameterSchema: []byte(parameterSchema),
+		IsActive:        true,
+		CreatedBy:       h.createdByPrincipal(r.Context()),
+	}
+	if err := h.storage.ExecPolicy.CreateExecCommandPolicy(r.Context(), policy); err != nil {
+		h.logger.Error("Failed to create exec policy", "name", name, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+create+exec+policy", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Exec+policy+created", http.StatusSeeOther)
+}
+
+func (h *Handlers) updateExecPolicy(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	policyID, err := uuid.Parse(strings.TrimSpace(r.PathValue("id")))
+	if err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+policy+ID", http.StatusSeeOther)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	commandTemplate := strings.TrimSpace(r.FormValue("command_template"))
+	if name == "" || commandTemplate == "" {
+		http.Redirect(w, r, "/access?flash=Policy+name+and+command+template+are+required", http.StatusSeeOther)
+		return
+	}
+
+	parameterSchema := strings.TrimSpace(r.FormValue("parameter_schema"))
+	if parameterSchema == "" {
+		parameterSchema = "[]"
+	}
+	if _, err := parseExecPolicyParameterSchema([]byte(parameterSchema)); err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+parameter+schema+JSON", http.StatusSeeOther)
+		return
+	}
+
+	policy := &storage.ExecCommandPolicy{
+		ID:              policyID,
+		Name:            name,
+		Description:     strings.TrimSpace(r.FormValue("description")),
+		CommandTemplate: commandTemplate,
+		ArgsTemplate:    normalizeExecTemplateArgs(r.FormValue("args_template")),
+		ParameterSchema: []byte(parameterSchema),
+		IsActive:        r.FormValue("is_active") != "false",
+	}
+	if err := h.storage.ExecPolicy.UpdateExecCommandPolicy(r.Context(), policy); err != nil {
+		h.logger.Error("Failed to update exec policy", "policy_id", policyID, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+update+exec+policy", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Exec+policy+updated", http.StatusSeeOther)
+}
+
+func (h *Handlers) deleteExecPolicy(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	policyID, err := uuid.Parse(strings.TrimSpace(r.PathValue("id")))
+	if err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+policy+ID", http.StatusSeeOther)
+		return
+	}
+	if err := h.storage.ExecPolicy.DeleteExecCommandPolicy(r.Context(), policyID); err != nil {
+		h.logger.Error("Failed to delete exec policy", "policy_id", policyID, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+delete+exec+policy", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Exec+policy+deleted", http.StatusSeeOther)
+}
+
+func (h *Handlers) createExecPolicyBinding(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	policyID, err := uuid.Parse(strings.TrimSpace(r.FormValue("policy_id")))
+	if err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+policy+ID", http.StatusSeeOther)
+		return
+	}
+	agentID, err := uuid.Parse(strings.TrimSpace(r.FormValue("agent_id")))
+	if err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+agent+ID", http.StatusSeeOther)
+		return
+	}
+
+	parameterValues := strings.TrimSpace(r.FormValue("parameter_values"))
+	if parameterValues == "" {
+		parameterValues = "{}"
+	}
+	if _, err := parseJSONStringMap([]byte(parameterValues)); err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+binding+parameter+JSON", http.StatusSeeOther)
+		return
+	}
+
+	binding := &storage.ExecCommandPolicyBinding{
+		ID:                      uuid.New(),
+		PolicyID:                policyID,
+		AgentID:                 agentID,
+		CommandTemplateOverride: mustNullString(r.FormValue("command_template_override")),
+		ArgsTemplateOverride:    normalizeExecTemplateArgs(r.FormValue("args_template_override")),
+		ParameterValues:         []byte(parameterValues),
+		IsActive:                true,
+	}
+	if err := h.storage.ExecPolicy.CreateExecCommandPolicyBinding(r.Context(), binding); err != nil {
+		h.logger.Error("Failed to create exec policy binding", "policy_id", policyID, "agent_id", agentID, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+save+exec+policy+binding", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Exec+policy+binding+saved", http.StatusSeeOther)
+}
+
+func (h *Handlers) updateExecPolicyBinding(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+
+	bindingID, err := uuid.Parse(strings.TrimSpace(r.PathValue("id")))
+	if err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+binding+ID", http.StatusSeeOther)
+		return
+	}
+
+	parameterValues := strings.TrimSpace(r.FormValue("parameter_values"))
+	if parameterValues == "" {
+		parameterValues = "{}"
+	}
+	if _, err := parseJSONStringMap([]byte(parameterValues)); err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+binding+parameter+JSON", http.StatusSeeOther)
+		return
+	}
+
+	binding := &storage.ExecCommandPolicyBinding{
+		ID:                      bindingID,
+		CommandTemplateOverride: mustNullString(r.FormValue("command_template_override")),
+		ArgsTemplateOverride:    normalizeExecTemplateArgs(r.FormValue("args_template_override")),
+		ParameterValues:         []byte(parameterValues),
+		IsActive:                r.FormValue("is_active") != "false",
+	}
+	if err := h.storage.ExecPolicy.UpdateExecCommandPolicyBinding(r.Context(), binding); err != nil {
+		h.logger.Error("Failed to update exec policy binding", "binding_id", bindingID, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+update+exec+policy+binding", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Exec+policy+binding+updated", http.StatusSeeOther)
+}
+
+func (h *Handlers) deleteExecPolicyBinding(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	bindingID, err := uuid.Parse(strings.TrimSpace(r.PathValue("id")))
+	if err != nil {
+		http.Redirect(w, r, "/access?flash=Invalid+binding+ID", http.StatusSeeOther)
+		return
+	}
+	if err := h.storage.ExecPolicy.DeleteExecCommandPolicyBinding(r.Context(), bindingID); err != nil {
+		h.logger.Error("Failed to delete exec policy binding", "binding_id", bindingID, "error", err)
+		http.Redirect(w, r, "/access?flash=Failed+to+delete+exec+policy+binding", http.StatusSeeOther)
+		return
+	}
+
+	http.Redirect(w, r, "/access?flash=Exec+policy+binding+deleted", http.StatusSeeOther)
+}
+
+func (h *Handlers) exportExecPolicies(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+
+	policies, err := h.storage.ExecPolicy.ListExecCommandPolicies(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list exec policies for export", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	bindings, err := h.storage.ExecPolicy.ListExecCommandPolicyBindings(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list exec policy bindings for export", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	agents, err := h.storage.Agent.ListAgents(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list agents for exec policy export", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	agentNames := make(map[uuid.UUID]string, len(agents))
+	for _, agent := range agents {
+		if agent != nil {
+			agentNames[agent.ID] = agent.Hostname
+		}
+	}
+	bindingsByPolicy := make(map[uuid.UUID][]*storage.ExecCommandPolicyBinding)
+	for _, binding := range bindings {
+		if binding != nil {
+			bindingsByPolicy[binding.PolicyID] = append(bindingsByPolicy[binding.PolicyID], binding)
+		}
+	}
+
+	bundle := ExecPolicyExportBundle{
+		Version:  1,
+		Policies: make([]ExecPolicyExportPolicy, 0, len(policies)),
+	}
+	for _, policy := range policies {
+		if policy == nil {
+			continue
+		}
+		defs, err := parseExecPolicyParameterSchema(policy.ParameterSchema)
+		if err != nil {
+			h.logger.Error("Failed to parse policy schema for export", "policy_id", policy.ID, "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		item := ExecPolicyExportPolicy{
+			Name:            policy.Name,
+			Description:     policy.Description,
+			CommandTemplate: policy.CommandTemplate,
+			ArgsTemplate:    []string(policy.ArgsTemplate),
+			ParameterSchema: defs,
+			IsActive:        policy.IsActive,
+			Bindings:        make([]ExecPolicyExportBinding, 0, len(bindingsByPolicy[policy.ID])),
+		}
+		for _, binding := range bindingsByPolicy[policy.ID] {
+			values, err := parseJSONStringMap(binding.ParameterValues)
+			if err != nil {
+				h.logger.Error("Failed to parse binding values for export", "binding_id", binding.ID, "error", err)
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+				return
+			}
+			exportBinding := ExecPolicyExportBinding{
+				AgentID:              binding.AgentID.String(),
+				AgentHostname:        agentNames[binding.AgentID],
+				ArgsTemplateOverride: []string(binding.ArgsTemplateOverride),
+				ParameterValues:      values,
+				IsActive:             binding.IsActive,
+			}
+			if binding.CommandTemplateOverride.Valid {
+				exportBinding.CommandTemplateOverride = binding.CommandTemplateOverride.String
+			}
+			item.Bindings = append(item.Bindings, exportBinding)
+		}
+		bundle.Policies = append(bundle.Policies, item)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", `attachment; filename="exec-policies.json"`)
+	if err := json.NewEncoder(w).Encode(bundle); err != nil {
+		h.logger.Error("Failed to write exec policy export", "error", err)
+	}
+}
+
+func (h *Handlers) importExecPolicies(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAdmin(w, r) {
+		return
+	}
+	if h.storage.ExecPolicy == nil {
+		http.Error(w, "Exec policy storage is not configured", http.StatusNotImplemented)
+		return
+	}
+	if err := r.ParseMultipartForm(2 << 20); err != nil {
+		http.Error(w, "Invalid form submission", http.StatusBadRequest)
+		return
+	}
+	report := &AccessImportReport{
+		Items: make([]AccessImportReportItem, 0),
+	}
+
+	var payload []byte
+	if text := strings.TrimSpace(r.FormValue("import_json")); text != "" {
+		payload = []byte(text)
+	} else if files := r.MultipartForm.File["import_file"]; len(files) > 0 {
+		file, err := files[0].Open()
+		if err != nil {
+			h.renderAccessPage(w, r, "Failed to read import file", report)
+			return
+		}
+		defer file.Close()
+		payload, err = io.ReadAll(file)
+		if err != nil {
+			h.renderAccessPage(w, r, "Failed to read import file", report)
+			return
+		}
+	} else {
+		h.renderAccessPage(w, r, "Provide JSON text or upload a JSON file", report)
+		return
+	}
+
+	var bundle ExecPolicyExportBundle
+	if err := json.Unmarshal(payload, &bundle); err != nil {
+		report.Summary = "Import failed"
+		report.Items = append(report.Items, AccessImportReportItem{
+			Level:   "error",
+			Scope:   "bundle",
+			Name:    "JSON",
+			Message: "Invalid import JSON",
+		})
+		h.renderAccessPage(w, r, "Invalid import JSON", report)
+		return
+	}
+
+	agents, err := h.storage.Agent.ListAgents(r.Context())
+	if err != nil {
+		h.logger.Error("Failed to list agents for import", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	agentsByID := make(map[string]*storage.Agent, len(agents))
+	agentsByHostname := make(map[string]*storage.Agent, len(agents))
+	for _, agent := range agents {
+		if agent == nil {
+			continue
+		}
+		agentsByID[strings.ToLower(agent.ID.String())] = agent
+		agentsByHostname[strings.ToLower(strings.TrimSpace(agent.Hostname))] = agent
+	}
+
+	importedPolicies := 0
+	importedBindings := 0
+	skippedBindings := 0
+	for _, importPolicy := range bundle.Policies {
+		schemaJSON, err := json.Marshal(importPolicy.ParameterSchema)
+		if err != nil {
+			report.Items = append(report.Items, AccessImportReportItem{
+				Level:   "error",
+				Scope:   "policy",
+				Name:    importPolicy.Name,
+				Message: "Failed to encode imported policy schema",
+			})
+			continue
+		}
+		policy := &storage.ExecCommandPolicy{
+			ID:              uuid.New(),
+			Name:            strings.TrimSpace(importPolicy.Name),
+			Description:     strings.TrimSpace(importPolicy.Description),
+			CommandTemplate: strings.TrimSpace(importPolicy.CommandTemplate),
+			ArgsTemplate:    pq.StringArray(importPolicy.ArgsTemplate),
+			ParameterSchema: schemaJSON,
+			IsActive:        importPolicy.IsActive,
+			CreatedBy:       h.createdByPrincipal(r.Context()),
+		}
+		if policy.Name == "" || policy.CommandTemplate == "" {
+			report.Items = append(report.Items, AccessImportReportItem{
+				Level:   "error",
+				Scope:   "policy",
+				Name:    importPolicy.Name,
+				Message: "Missing policy name or command template",
+			})
+			continue
+		}
+		if err := h.storage.ExecPolicy.CreateExecCommandPolicy(r.Context(), policy); err != nil {
+			h.logger.Error("Failed to import exec policy", "policy_name", policy.Name, "error", err)
+			report.Items = append(report.Items, AccessImportReportItem{
+				Level:   "error",
+				Scope:   "policy",
+				Name:    policy.Name,
+				Message: fmt.Sprintf("Failed to import policy: %v", err),
+			})
+			continue
+		}
+		importedPolicies++
+		report.Items = append(report.Items, AccessImportReportItem{
+			Level:   "success",
+			Scope:   "policy",
+			Name:    policy.Name,
+			Message: "Policy imported",
+		})
+
+		for _, importBinding := range importPolicy.Bindings {
+			var agent *storage.Agent
+			if importBinding.AgentID != "" {
+				agent = agentsByID[strings.ToLower(strings.TrimSpace(importBinding.AgentID))]
+			}
+			if agent == nil && importBinding.AgentHostname != "" {
+				agent = agentsByHostname[strings.ToLower(strings.TrimSpace(importBinding.AgentHostname))]
+			}
+			if agent == nil {
+				h.logger.Warn("Skipping imported binding because agent was not found", "policy_name", policy.Name, "agent_id", importBinding.AgentID, "agent_hostname", importBinding.AgentHostname)
+				skippedBindings++
+				report.Items = append(report.Items, AccessImportReportItem{
+					Level:   "warning",
+					Scope:   "binding",
+					Name:    policy.Name,
+					Message: fmt.Sprintf("Skipped binding for missing agent id=%s hostname=%s", importBinding.AgentID, importBinding.AgentHostname),
+				})
+				continue
+			}
+			paramJSON, err := json.Marshal(importBinding.ParameterValues)
+			if err != nil {
+				report.Items = append(report.Items, AccessImportReportItem{
+					Level:   "error",
+					Scope:   "binding",
+					Name:    policy.Name,
+					Message: fmt.Sprintf("Failed to encode binding values for agent %s", agent.Hostname),
+				})
+				continue
+			}
+			binding := &storage.ExecCommandPolicyBinding{
+				ID:                      uuid.New(),
+				PolicyID:                policy.ID,
+				AgentID:                 agent.ID,
+				CommandTemplateOverride: mustNullString(importBinding.CommandTemplateOverride),
+				ArgsTemplateOverride:    pq.StringArray(importBinding.ArgsTemplateOverride),
+				ParameterValues:         paramJSON,
+				IsActive:                importBinding.IsActive,
+			}
+			if err := h.storage.ExecPolicy.CreateExecCommandPolicyBinding(r.Context(), binding); err != nil {
+				h.logger.Error("Failed to import exec policy binding", "policy_name", policy.Name, "agent_id", agent.ID, "error", err)
+				report.Items = append(report.Items, AccessImportReportItem{
+					Level:   "error",
+					Scope:   "binding",
+					Name:    policy.Name,
+					Message: fmt.Sprintf("Failed to import binding for agent %s: %v", agent.Hostname, err),
+				})
+				continue
+			}
+			importedBindings++
+			report.Items = append(report.Items, AccessImportReportItem{
+				Level:   "success",
+				Scope:   "binding",
+				Name:    policy.Name,
+				Message: fmt.Sprintf("Binding imported for agent %s", agent.Hostname),
+			})
+		}
+	}
+	report.Summary = fmt.Sprintf("Import finished: %d policies, %d bindings, %d skipped bindings", importedPolicies, importedBindings, skippedBindings)
+	h.renderAccessPage(w, r, "Exec policies import completed", report)
 }
 
 func (h *Handlers) showRescheduleTaskForm(w http.ResponseWriter, r *http.Request) {
@@ -711,7 +1285,11 @@ func (h *Handlers) showNewTaskForm(w http.ResponseWriter, r *http.Request, formE
 		var description string
 		switch task.TaskType {
 		case storage.TaskTypeExecCommand:
-			description = fmt.Sprintf("CMD: %s", task.Command.String)
+			if h.canViewExecCommandDetails(r.Context(), task) {
+				description = fmt.Sprintf("CMD: %s", task.Command.String)
+			} else {
+				description = "CMD: Hidden by exec policy permissions"
+			}
 		case storage.TaskTypeExecPythonScript:
 			description = fmt.Sprintf("Python: %s", task.EntrypointScript.String)
 		case storage.TaskTypeFetchFile:
@@ -733,7 +1311,24 @@ func (h *Handlers) showNewTaskForm(w http.ResponseWriter, r *http.Request, formE
 		}
 	}
 
-	pageData := NewTaskPageData{Agents: agents, SelectableTasks: selectableTasks}
+	execPolicies, err := h.accessibleExecPolicies(r.Context(), false)
+	if err != nil {
+		h.logger.Error("Failed to load exec policies for task form", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	policiesJSON, err := json.Marshal(execPolicies)
+	if err != nil {
+		h.logger.Error("Failed to marshal exec policies for task form", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	pageData := NewTaskPageData{
+		Agents:           agents,
+		SelectableTasks:  selectableTasks,
+		ExecPoliciesJSON: template.JS(policiesJSON),
+	}
 	if formError != nil {
 		pageData.Error = formError.Error()
 	}
@@ -767,6 +1362,22 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	timeout, _ := strconv.Atoi(r.FormValue("timeout_seconds"))
 	files := r.MultipartForm.File["files"]
+	principal := auth.PrincipalFromContext(r.Context())
+	useExecPolicy := false
+	var execPolicyID uuid.UUID
+	if taskType == storage.TaskTypeExecCommand {
+		policyIDValue := strings.TrimSpace(r.FormValue("exec_policy_id"))
+		if policyIDValue != "" {
+			parsedPolicyID, err := uuid.Parse(policyIDValue)
+			if err != nil {
+				h.showNewTaskForm(w, r, fmt.Errorf("invalid exec policy ID"))
+				return
+			}
+			execPolicyID = parsedPolicyID
+			useExecPolicy = true
+		}
+	}
+	execPolicyUserValues := collectExecPolicyUserValues(r.Form)
 
 	// --- Handle Scheduling ---
 	scheduleType := r.FormValue("schedule_type")
@@ -879,6 +1490,25 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 
 		switch taskType {
 		case storage.TaskTypeExecCommand:
+			if useExecPolicy {
+				resolved, err := h.resolveExecPolicyTask(r.Context(), principal, execPolicyID, agentID, execPolicyUserValues)
+				if err != nil {
+					h.logger.Error("Failed to resolve exec policy task", "policy_id", execPolicyID, "agent_id", agentID, "error", err)
+					if strings.Contains(strings.ToLower(err.Error()), "forbidden") {
+						http.Error(w, "Forbidden", http.StatusForbidden)
+						return
+					}
+					h.showNewTaskForm(w, r, err)
+					return
+				}
+				task.ExecPolicyID = uuid.NullUUID{UUID: resolved.PolicyID, Valid: true}
+				task.ExecPolicyBindingID = uuid.NullUUID{UUID: resolved.BindingID, Valid: true}
+				task.Command = sql.NullString{String: resolved.Command, Valid: resolved.Command != ""}
+				if len(resolved.Args) > 0 {
+					task.Args = pq.StringArray(resolved.Args)
+				}
+				break
+			}
 			task.Command = sql.NullString{String: r.FormValue("command"), Valid: r.FormValue("command") != ""}
 			args := r.FormValue("args")
 			if args != "" {
@@ -1036,12 +1666,15 @@ func buildAccessUserCards(users []*storage.User) []*AccessUserCard {
 				card.ActionRoles = append(card.ActionRoles, role)
 			case strings.HasPrefix(role, auth.AgentRolePrefix):
 				card.AgentRoles = append(card.AgentRoles, role)
+			case strings.HasPrefix(role, auth.PolicyRolePrefix):
+				card.PolicyRoles = append(card.PolicyRoles, role)
 			default:
 				card.OtherRoles = append(card.OtherRoles, role)
 			}
 		}
 		sort.Strings(card.ActionRoles)
 		sort.Strings(card.AgentRoles)
+		sort.Strings(card.PolicyRoles)
 		sort.Strings(card.OtherRoles)
 		result = append(result, card)
 	}
@@ -1083,6 +1716,14 @@ func accessPermissionOptions() []AccessPermissionOption {
 	}
 }
 
+func execPolicyPermissionOptions() []AccessPermissionOption {
+	return []AccessPermissionOption{
+		{Key: auth.ExecPolicyPermissionUse, Label: "Use", Description: "Use the policy when creating EXEC_COMMAND tasks"},
+		{Key: auth.ExecPolicyPermissionView, Label: "View", Description: "View resolved command and arguments for policy-backed tasks"},
+		{Key: auth.ExecPolicyPermissionManage, Label: "Manage", Description: "Reserved for delegated policy management workflows"},
+	}
+}
+
 func classifyRoleGroup(roleName string) string {
 	switch {
 	case roleName == auth.RoleAdmin, roleName == auth.RoleFullAccess:
@@ -1091,6 +1732,8 @@ func classifyRoleGroup(roleName string) string {
 		return "Actions"
 	case strings.HasPrefix(roleName, auth.AgentRolePrefix):
 		return "Agents"
+	case strings.HasPrefix(roleName, auth.PolicyRolePrefix):
+		return "Policies"
 	default:
 		return "Other"
 	}
@@ -1120,6 +1763,14 @@ func containsAnyRole(roleNames []string, expected ...string) bool {
 		}
 	}
 	return false
+}
+
+func mustMarshalTemplateJS(v any) template.JS {
+	payload, err := json.Marshal(v)
+	if err != nil {
+		return template.JS("[]")
+	}
+	return template.JS(payload)
 }
 
 func isLastActiveAdmin(users []*storage.User, username string) bool {
@@ -1219,6 +1870,14 @@ func (h *Handlers) canToggleAgentStatus(ctx context.Context, agentID uuid.UUID) 
 func (h *Handlers) canDeleteAgent(ctx context.Context, agentID uuid.UUID) bool {
 	principal := auth.PrincipalFromContext(ctx)
 	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionDelete)
+}
+
+func (h *Handlers) canViewExecCommandDetails(ctx context.Context, task *storage.Task) bool {
+	if task == nil || !task.ExecPolicyID.Valid {
+		return true
+	}
+	principal := auth.PrincipalFromContext(ctx)
+	return principal == nil || principal.HasExecPolicyPermission(task.ExecPolicyID.UUID, auth.ExecPolicyPermissionView)
 }
 
 func (h *Handlers) filterVisibleAgents(ctx context.Context, agents []*storage.Agent) []*storage.Agent {

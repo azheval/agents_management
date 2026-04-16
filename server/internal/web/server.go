@@ -15,9 +15,10 @@ import (
 
 // Define the function map.
 var funcMap = template.FuncMap{
-	"lower":               strings.ToLower,
-	"agentPermissionRole": auth.RoleForAgentPermission,
-	"agentLegacyRole":     auth.RoleForAgent,
+	"lower":                strings.ToLower,
+	"agentPermissionRole":  auth.RoleForAgentPermission,
+	"agentLegacyRole":      auth.RoleForAgent,
+	"policyPermissionRole": auth.RoleForExecPolicy,
 }
 
 // StartWebServer initializes and starts the web server.
@@ -57,6 +58,14 @@ func StartWebServer(cfg config.WebserverConfig, logger *slog.Logger, storage *st
 	mux.HandleFunc("POST /access/users/{username}/password", handlers.updateUserPassword)
 	mux.HandleFunc("POST /access/users/{username}/status", handlers.updateUserStatus)
 	mux.HandleFunc("POST /access/users/{username}/roles", handlers.updateUserRoles)
+	mux.HandleFunc("GET /access/exec-policies/export", handlers.exportExecPolicies)
+	mux.HandleFunc("POST /access/exec-policies/import", handlers.importExecPolicies)
+	mux.HandleFunc("POST /access/exec-policies", handlers.createExecPolicy)
+	mux.HandleFunc("POST /access/exec-policies/bindings", handlers.createExecPolicyBinding)
+	mux.HandleFunc("POST /access/exec-policies/{id}/update", handlers.updateExecPolicy)
+	mux.HandleFunc("POST /access/exec-policies/{id}/delete", handlers.deleteExecPolicy)
+	mux.HandleFunc("POST /access/exec-policies/bindings/{id}/update", handlers.updateExecPolicyBinding)
+	mux.HandleFunc("POST /access/exec-policies/bindings/{id}/delete", handlers.deleteExecPolicyBinding)
 	mux.HandleFunc("GET /task/{id}/reschedule", handlers.handleRescheduleTask)
 	mux.HandleFunc("POST /task/{id}/reschedule", handlers.handleRescheduleTask)
 	mux.HandleFunc("/agent/toggle_status", handlers.toggleAgentStatus)

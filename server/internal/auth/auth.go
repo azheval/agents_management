@@ -19,6 +19,7 @@ const (
 	RoleFullAccess   = "full_access"
 	ActionRolePrefix = "action."
 	AgentRolePrefix  = "agent:"
+	PolicyRolePrefix = "exec_policy:"
 	basicAuthRealm   = `Basic realm="agent-management"`
 )
 
@@ -31,6 +32,12 @@ const (
 	AgentPermissionNotificationView = "notification_view"
 	AgentPermissionStatusToggle     = "status_toggle"
 	AgentPermissionDelete           = "delete"
+)
+
+const (
+	ExecPolicyPermissionView   = "view"
+	ExecPolicyPermissionUse    = "use"
+	ExecPolicyPermissionManage = "manage"
 )
 
 type contextKey string
@@ -144,6 +151,17 @@ func (p *Principal) HasAgentPermission(agentID uuid.UUID, permission string) boo
 	return p.IsAdmin() ||
 		p.HasRole(RoleForAgent(agentID)) ||
 		p.HasRole(RoleForAgentPermission(agentID, permission))
+}
+
+func RoleForExecPolicy(policyID uuid.UUID, permission string) string {
+	return PolicyRolePrefix + strings.ToLower(policyID.String()) + ":" + strings.ToLower(strings.TrimSpace(permission))
+}
+
+func (p *Principal) HasExecPolicyPermission(policyID uuid.UUID, permission string) bool {
+	if p == nil {
+		return false
+	}
+	return p.IsAdmin() || p.HasRole(RoleForExecPolicy(policyID, permission))
 }
 
 func WithPrincipal(ctx context.Context, principal *Principal) context.Context {

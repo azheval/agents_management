@@ -58,7 +58,8 @@ func main() {
 	metricRepo := storage.NewPostgresMetricRepository(db)
 	notificationRepo := storage.NewPostgresNotificationRepository(db)
 	userRepo := storage.NewPostgresUserRepository(db)
-	appStorage := storage.NewStorage(agentRepo, taskRepo, logRepo, metricRepo, notificationRepo, userRepo)
+	execPolicyRepo := storage.NewPostgresExecPolicyRepository(db)
+	appStorage := storage.NewStorage(agentRepo, taskRepo, logRepo, metricRepo, notificationRepo, userRepo, execPolicyRepo)
 
 	// Create and start the agent status service
 	statusLogger := appLogger.With("service", "AgentStatusService")

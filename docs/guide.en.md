@@ -64,16 +64,22 @@ Permissions are configured in the `Access` section.
 
 ![img_013.png](/docs/img/img_013.png)
 
-The system uses three groups of permissions:
+The system uses four groups of permissions:
 
 - `admin` and `full_access` grant full access to all sections and all agents.
 - Global `action.*` roles define which task types a user is allowed to create.
 - Permissions of the form `agent:<uuid>:...` define which actions are allowed for a specific agent.
+- EXEC_COMMAND policy permissions `exec_policy:<uuid>:use|view|manage` define access to saved command policies.
 
 To create a task, a user must have both:
 
 - the global action role matching the task type, for example `action.exec_command`;
 - the `agent:<uuid>:task_create` permission for the selected agent.
+- `exec_policy:<policy_uuid>:use`
+
+To view resolved command and arguments of a policy-backed task, the user must additionally have:
+
+- `exec_policy:<policy_uuid>:view`
 
 The permission matrix in the `Access` section lets you assign rights at the intersection of user, agent, and operation. It supports separate permissions for:
 
@@ -85,6 +91,74 @@ The permission matrix in the `Access` section lets you assign rights at the inte
 - viewing notifications;
 - toggling agent status;
 - deleting the agent.
+
+## EXEC_COMMAND Policies
+
+Saved EXEC_COMMAND policies are designed for secure and reusable command execution.
+
+A policy stores:
+
+- policy name and description
+- command template
+- args template
+- parameter schema
+
+A binding stores values for a specific agent:
+
+- target agent
+- optional command template override
+- optional args template override
+- parameter values JSON
+
+Templates use double braces:
+
+- `{{target}}`
+- `{{count}}`
+
+Example policy for `ping`:
+
+- Command Template: `ping`
+- Args Template: `-n,{{count}},{{target}}`
+
+Example parameter schema:
+
+```json
+[
+  {
+    "name": "target",
+    "label": "Target",
+    "type": "text",
+    "required": true,
+    "editable": false
+  },
+  {
+    "name": "count",
+    "label": "Count",
+    "type": "number",
+    "required": true,
+    "editable": true,
+    "default_value": "4"
+  }
+]
+```
+
+Example binding for agent A:
+
+```json
+{
+  "target": "127.0.0.1"
+}
+```
+
+After resolution the task will execute:
+
+```text
+ping -n 4 127.0.0.1
+```
+
+![img_014.png](/docs/img/img_014.png)
+
+![img_015.png](/docs/img/img_015.png)
 
 Recommended setup flow:
 
@@ -107,6 +181,10 @@ The task type is specified. For each task type, unique fields need to be filled 
 ![img_002.png](/docs/img/img_002.png)
 
 Fill in the task description, command (for example, `C:/ws/tech_log/go/techlog-stat/.dist/techlog-stat.exe`), command arguments are specified separated by commas (for example, `sdbl-context,--input,C:/ws/tech_log/logs,--glob,*/*.*,--output,C:/ws/tech_log/out/sdbl_agent,--top,10`).
+
+When using templates, simply select a template.
+
+![img_016.png](/docs/img/img_016.png)
 
 #### EXEC_PYTHON_SCRIPT
 

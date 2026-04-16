@@ -96,14 +96,14 @@ func NewPostgresTaskRepository(db *sqlx.DB) *PostgresTaskRepository {
 func (r *PostgresTaskRepository) CreateTask(ctx context.Context, task *Task) error {
 	query := `
 		INSERT INTO tasks (
-			id, agent_id, description, task_type, command, args, entrypoint_script, package_files, 
+			id, agent_id, description, task_type, exec_policy_id, exec_policy_binding_id, command, args, entrypoint_script, package_files, 
 			source_path, destination_path, result_contract, notification_rule_set, default_destinations, timeout_seconds, status, 
 			schedule_type, cron_expression, prerequisite_task_id, scheduled_at, created_by
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20);
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22);
 	`
 	_, err := r.db.ExecContext(ctx, query,
-		task.ID, task.AgentID, task.Description, task.TaskType, task.Command, task.Args, task.EntrypointScript,
+		task.ID, task.AgentID, task.Description, task.TaskType, task.ExecPolicyID, task.ExecPolicyBindingID, task.Command, task.Args, task.EntrypointScript,
 		task.PackageFiles, task.SourcePath, task.DestinationPath, task.ResultContract, task.NotificationRuleSet, task.DefaultDestinations, task.TimeoutSeconds, task.Status,
 		task.ScheduleType, task.CronExpression, task.PrerequisiteTaskID, task.ScheduledAt, task.CreatedBy,
 	)
@@ -690,4 +690,121 @@ func (r *PostgresUserRepository) SetUserRoles(ctx context.Context, username stri
 	}
 
 	return tx.Commit()
+}
+
+// PostgresExecPolicyRepository is the PostgreSQL implementation of the ExecPolicyRepository.
+type PostgresExecPolicyRepository struct {
+	db *sqlx.DB
+}
+
+// NewPostgresExecPolicyRepository creates a repository for EXEC_COMMAND policies.
+func NewPostgresExecPolicyRepository(db *sqlx.DB) *PostgresExecPolicyRepository {
+	return &PostgresExecPolicyRepository{db: db}
+}
+
+func (r *PostgresExecPolicyRepository) CreateExecCommandPolicy(ctx context.Context, policy *ExecCommandPolicy) error {
+	query := `
+		INSERT INTO exec_command_policies (
+			id, name, description, command_template, args_template, parameter_schema, is_active, created_by
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		policy.ID, policy.Name, policy.Description, policy.CommandTemplate, policy.ArgsTemplate, policy.ParameterSchema, policy.IsActive, policy.CreatedBy,
+	)
+	return err
+}
+
+func (r *PostgresExecPolicyRepository) UpdateExecCommandPolicy(ctx context.Context, policy *ExecCommandPolicy) error {
+	query := `
+		UPDATE exec_command_policies
+		SET name = $1,
+			description = $2,
+			command_template = $3,
+			args_template = $4,
+			parameter_schema = $5,
+			is_active = $6,
+			updated_at = NOW()
+		WHERE id = $7
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		policy.Name, policy.Description, policy.CommandTemplate, policy.ArgsTemplate, policy.ParameterSchema, policy.IsActive, policy.ID,
+	)
+	return err
+}
+
+func (r *PostgresExecPolicyRepository) DeleteExecCommandPolicy(ctx context.Context, id uuid.UUID) error {
+	query := "DELETE FROM exec_command_policies WHERE id = $1"
+	_, err := r.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (r *PostgresExecPolicyRepository) ListExecCommandPolicies(ctx context.Context) ([]*ExecCommandPolicy, error) {
+	var policies []*ExecCommandPolicy
+	query := "SELECT * FROM exec_command_policies ORDER BY name ASC"
+	err := r.db.SelectContext(ctx, &policies, query)
+	return policies, err
+}
+
+func (r *PostgresExecPolicyRepository) GetExecCommandPolicyByID(ctx context.Context, id uuid.UUID) (*ExecCommandPolicy, error) {
+	var policy ExecCommandPolicy
+	query := "SELECT * FROM exec_command_policies WHERE id = $1"
+	err := r.db.GetContext(ctx, &policy, query, id)
+	return &policy, err
+}
+
+func (r *PostgresExecPolicyRepository) CreateExecCommandPolicyBinding(ctx context.Context, binding *ExecCommandPolicyBinding) error {
+	query := `
+		INSERT INTO exec_command_policy_bindings (
+			id, policy_id, agent_id, command_template_override, args_template_override, parameter_values, is_active
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (policy_id, agent_id) DO UPDATE SET
+			command_template_override = EXCLUDED.command_template_override,
+			args_template_override = EXCLUDED.args_template_override,
+			parameter_values = EXCLUDED.parameter_values,
+			is_active = EXCLUDED.is_active,
+			updated_at = NOW()
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		binding.ID, binding.PolicyID, binding.AgentID, binding.CommandTemplateOverride, binding.ArgsTemplateOverride, binding.ParameterValues, binding.IsActive,
+	)
+	return err
+}
+
+func (r *PostgresExecPolicyRepository) UpdateExecCommandPolicyBinding(ctx context.Context, binding *ExecCommandPolicyBinding) error {
+	query := `
+		UPDATE exec_command_policy_bindings
+		SET command_template_override = $1,
+			args_template_override = $2,
+			parameter_values = $3,
+			is_active = $4,
+			updated_at = NOW()
+		WHERE id = $5
+	`
+	_, err := r.db.ExecContext(ctx, query,
+		binding.CommandTemplateOverride, binding.ArgsTemplateOverride, binding.ParameterValues, binding.IsActive, binding.ID,
+	)
+	return err
+}
+
+func (r *PostgresExecPolicyRepository) DeleteExecCommandPolicyBinding(ctx context.Context, id uuid.UUID) error {
+	query := "DELETE FROM exec_command_policy_bindings WHERE id = $1"
+	_, err := r.db.ExecContext(ctx, query, id)
+	return err
+}
+
+func (r *PostgresExecPolicyRepository) ListExecCommandPolicyBindings(ctx context.Context) ([]*ExecCommandPolicyBinding, error) {
+	var bindings []*ExecCommandPolicyBinding
+	query := "SELECT * FROM exec_command_policy_bindings ORDER BY created_at DESC"
+	err := r.db.SelectContext(ctx, &bindings, query)
+	return bindings, err
+}
+
+func (r *PostgresExecPolicyRepository) GetExecCommandPolicyBinding(ctx context.Context, policyID, agentID uuid.UUID) (*ExecCommandPolicyBinding, error) {
+	var binding ExecCommandPolicyBinding
+	query := `
+		SELECT * FROM exec_command_policy_bindings
+		WHERE policy_id = $1 AND agent_id = $2 AND is_active = TRUE
+	`
+	err := r.db.GetContext(ctx, &binding, query, policyID, agentID)
+	return &binding, err
 }

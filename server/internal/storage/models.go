@@ -57,6 +57,8 @@ type Task struct {
 	AgentID             uuid.UUID      `db:"agent_id" json:"agentId"`
 	Description         sql.NullString `db:"description" json:"description"`
 	TaskType            TaskType       `db:"task_type" json:"taskType"`
+	ExecPolicyID        uuid.NullUUID  `db:"exec_policy_id" json:"execPolicyId"`
+	ExecPolicyBindingID uuid.NullUUID  `db:"exec_policy_binding_id" json:"execPolicyBindingId"`
 	Command             sql.NullString `db:"command" json:"command"`
 	Args                pq.StringArray `db:"args" json:"args"`
 	EntrypointScript    sql.NullString `db:"entrypoint_script" json:"entrypointScript"`
@@ -206,4 +208,31 @@ type Role struct {
 	Name        string    `db:"name"`
 	Description string    `db:"description"`
 	CreatedAt   time.Time `db:"created_at"`
+}
+
+// ExecCommandPolicy defines a reusable EXEC_COMMAND policy with parameter rules.
+type ExecCommandPolicy struct {
+	ID              uuid.UUID      `db:"id"`
+	Name            string         `db:"name"`
+	Description     string         `db:"description"`
+	CommandTemplate string         `db:"command_template"`
+	ArgsTemplate    pq.StringArray `db:"args_template"`
+	ParameterSchema []byte         `db:"parameter_schema"`
+	IsActive        bool           `db:"is_active"`
+	CreatedBy       sql.NullString `db:"created_by"`
+	CreatedAt       time.Time      `db:"created_at"`
+	UpdatedAt       time.Time      `db:"updated_at"`
+}
+
+// ExecCommandPolicyBinding stores agent-specific values and overrides for a policy.
+type ExecCommandPolicyBinding struct {
+	ID                      uuid.UUID      `db:"id"`
+	PolicyID                uuid.UUID      `db:"policy_id"`
+	AgentID                 uuid.UUID      `db:"agent_id"`
+	CommandTemplateOverride sql.NullString `db:"command_template_override"`
+	ArgsTemplateOverride    pq.StringArray `db:"args_template_override"`
+	ParameterValues         []byte         `db:"parameter_values"`
+	IsActive                bool           `db:"is_active"`
+	CreatedAt               time.Time      `db:"created_at"`
+	UpdatedAt               time.Time      `db:"updated_at"`
 }

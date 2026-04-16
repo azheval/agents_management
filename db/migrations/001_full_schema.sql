@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     agent_id UUID REFERENCES agents(id) ON DELETE SET NULL,
     description TEXT,
     task_type task_type NOT NULL,
+    exec_policy_id UUID,
+    exec_policy_binding_id UUID,
     command TEXT,
     args TEXT[],
     source_path VARCHAR(1024),
@@ -49,6 +51,46 @@ CREATE TABLE IF NOT EXISTS tasks (
     cron_expression VARCHAR(255),
     prerequisite_task_id UUID REFERENCES tasks(id) ON DELETE SET NULL
 );
+
+-- Table: exec_command_policies
+CREATE TABLE IF NOT EXISTS exec_command_policies (
+    id UUID PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    command_template TEXT NOT NULL,
+    args_template TEXT[] NOT NULL DEFAULT '{}',
+    parameter_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Table: exec_command_policy_bindings
+CREATE TABLE IF NOT EXISTS exec_command_policy_bindings (
+    id UUID PRIMARY KEY,
+    policy_id UUID NOT NULL REFERENCES exec_command_policies(id) ON DELETE CASCADE,
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    command_template_override TEXT,
+    args_template_override TEXT[] NOT NULL DEFAULT '{}',
+    parameter_values JSONB NOT NULL DEFAULT '{}'::jsonb,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT exec_command_policy_bindings_policy_agent_unique UNIQUE (policy_id, agent_id)
+);
+
+ALTER TABLE tasks
+    ADD CONSTRAINT fk_tasks_exec_policy
+        FOREIGN KEY (exec_policy_id)
+        REFERENCES exec_command_policies(id)
+        ON DELETE SET NULL;
+
+ALTER TABLE tasks
+    ADD CONSTRAINT fk_tasks_exec_policy_binding
+        FOREIGN KEY (exec_policy_binding_id)
+        REFERENCES exec_command_policy_bindings(id)
+        ON DELETE SET NULL;
 
 -- Table: task_results
 CREATE TABLE IF NOT EXISTS task_results (
@@ -156,8 +198,12 @@ CREATE TABLE IF NOT EXISTS user_roles (
 -- Create indexes for foreign keys and frequently queried columns
 CREATE INDEX IF NOT EXISTS idx_tasks_agent_id ON tasks(agent_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_exec_policy_id ON tasks(exec_policy_id);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 CREATE INDEX IF NOT EXISTS idx_agents_last_heartbeat ON agents(last_heartbeat);
+CREATE INDEX IF NOT EXISTS idx_exec_command_policies_is_active ON exec_command_policies(is_active);
+CREATE INDEX IF NOT EXISTS idx_exec_command_policy_bindings_policy_id ON exec_command_policy_bindings(policy_id);
+CREATE INDEX IF NOT EXISTS idx_exec_command_policy_bindings_agent_id ON exec_command_policy_bindings(agent_id);
 CREATE INDEX IF NOT EXISTS idx_task_results_task_id ON task_results(task_id);
 CREATE INDEX IF NOT EXISTS idx_logs_task_id ON logs(task_id);
 CREATE INDEX IF NOT EXISTS idx_logs_agent_id ON logs(agent_id);
@@ -195,6 +241,16 @@ EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_users_updated_at
 BEFORE UPDATE ON users
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_exec_command_policies_updated_at
+BEFORE UPDATE ON exec_command_policies
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_exec_command_policy_bindings_updated_at
+BEFORE UPDATE ON exec_command_policy_bindings
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 

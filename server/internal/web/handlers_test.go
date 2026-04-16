@@ -5,6 +5,7 @@ import (
 	"agent-management/server/internal/events"
 	"agent-management/server/internal/notifier"
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"html/template"
@@ -25,6 +26,63 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
+type stubExecPolicyRepository struct {
+	policy  *storage.ExecCommandPolicy
+	binding *storage.ExecCommandPolicyBinding
+}
+
+func (s *stubExecPolicyRepository) CreateExecCommandPolicy(ctx context.Context, policy *storage.ExecCommandPolicy) error {
+	return nil
+}
+
+func (s *stubExecPolicyRepository) UpdateExecCommandPolicy(ctx context.Context, policy *storage.ExecCommandPolicy) error {
+	return nil
+}
+
+func (s *stubExecPolicyRepository) DeleteExecCommandPolicy(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (s *stubExecPolicyRepository) ListExecCommandPolicies(ctx context.Context) ([]*storage.ExecCommandPolicy, error) {
+	if s.policy == nil {
+		return nil, nil
+	}
+	return []*storage.ExecCommandPolicy{s.policy}, nil
+}
+
+func (s *stubExecPolicyRepository) GetExecCommandPolicyByID(ctx context.Context, id uuid.UUID) (*storage.ExecCommandPolicy, error) {
+	if s.policy != nil && s.policy.ID == id {
+		return s.policy, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (s *stubExecPolicyRepository) CreateExecCommandPolicyBinding(ctx context.Context, binding *storage.ExecCommandPolicyBinding) error {
+	return nil
+}
+
+func (s *stubExecPolicyRepository) UpdateExecCommandPolicyBinding(ctx context.Context, binding *storage.ExecCommandPolicyBinding) error {
+	return nil
+}
+
+func (s *stubExecPolicyRepository) DeleteExecCommandPolicyBinding(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (s *stubExecPolicyRepository) ListExecCommandPolicyBindings(ctx context.Context) ([]*storage.ExecCommandPolicyBinding, error) {
+	if s.binding == nil {
+		return nil, nil
+	}
+	return []*storage.ExecCommandPolicyBinding{s.binding}, nil
+}
+
+func (s *stubExecPolicyRepository) GetExecCommandPolicyBinding(ctx context.Context, policyID, agentID uuid.UUID) (*storage.ExecCommandPolicyBinding, error) {
+	if s.binding != nil && s.binding.PolicyID == policyID && s.binding.AgentID == agentID {
+		return s.binding, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
 // setupTestHandlers is a helper function to create all mocks and handlers for testing.
 func setupTestHandlers(t *testing.T) (*Handlers, *mocks.MockAgentRepository, *mocks.MockTaskRepository, *mocks.MockLogRepository, *mocks.MockMetricRepository, *mocks.MockNotificationRepository, *events.EventBroker) {
 	ctrl := gomock.NewController(t)
@@ -43,9 +101,10 @@ func setupTestHandlers(t *testing.T) (*Handlers, *mocks.MockAgentRepository, *mo
 	}
 
 	var funcMap = template.FuncMap{
-		"lower":               strings.ToLower,
-		"agentPermissionRole": auth.RoleForAgentPermission,
-		"agentLegacyRole":     auth.RoleForAgent,
+		"lower":                strings.ToLower,
+		"agentPermissionRole":  auth.RoleForAgentPermission,
+		"agentLegacyRole":      auth.RoleForAgent,
+		"policyPermissionRole": auth.RoleForExecPolicy,
 	}
 
 	templates, err := template.New("").Funcs(funcMap).ParseGlob("../web/templates/*.html")
@@ -255,6 +314,78 @@ func TestCreateTask(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusForbidden {
 			t.Errorf("createTask without action role returned wrong status: got %v want %v", status, http.StatusForbidden)
+		}
+	})
+
+	t.Run("exec policy resolves non-editable binding value", func(t *testing.T) {
+		policyID := uuid.New()
+		bindingID := uuid.New()
+		execPolicyRepo := &stubExecPolicyRepository{
+			policy: &storage.ExecCommandPolicy{
+				ID:              policyID,
+				Name:            "Ping target",
+				CommandTemplate: "ping",
+				ArgsTemplate:    []string{"{{target}}"},
+				ParameterSchema: []byte(`[{"name":"target","label":"Target","type":"text","required":true,"editable":false}]`),
+				IsActive:        true,
+			},
+			binding: &storage.ExecCommandPolicyBinding{
+				ID:                   bindingID,
+				PolicyID:             policyID,
+				AgentID:              agentID,
+				ArgsTemplateOverride: []string{},
+				ParameterValues:      []byte(`{"target":"127.0.0.1"}`),
+				IsActive:             true,
+			},
+		}
+		h.storage.ExecPolicy = execPolicyRepo
+
+		values := map[string]string{
+			"agent_id":       agentID.String(),
+			"task_type":      "EXEC_COMMAND",
+			"exec_policy_id": policyID.String(),
+		}
+		req, err := createMultipartRequest(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req = req.WithContext(auth.WithPrincipal(req.Context(), auth.NewPrincipal("operator", []string{
+			auth.RoleForTaskType(storage.TaskTypeExecCommand),
+			auth.RoleForAgentPermission(agentID, auth.AgentPermissionTaskCreate),
+			auth.RoleForExecPolicy(policyID, auth.ExecPolicyPermissionUse),
+		})))
+
+		mockTaskRepo.EXPECT().
+			ListTasks(gomock.Any()).
+			Return(nil, nil).
+			AnyTimes()
+		mockAgentRepo.EXPECT().
+			ListAgents(gomock.Any()).
+			Return([]*storage.Agent{{ID: agentID, Hostname: "agent-a"}}, nil).
+			AnyTimes()
+		mockTaskRepo.EXPECT().
+			CreateTask(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ any, task *storage.Task) error {
+				if !task.Command.Valid || task.Command.String != "ping" {
+					t.Fatalf("expected resolved command ping, got %+v", task.Command)
+				}
+				if len(task.Args) != 1 || task.Args[0] != "127.0.0.1" {
+					t.Fatalf("expected resolved args [127.0.0.1], got %+v", task.Args)
+				}
+				if !task.ExecPolicyID.Valid || task.ExecPolicyID.UUID != policyID {
+					t.Fatalf("expected exec policy id to be set, got %+v", task.ExecPolicyID)
+				}
+				if !task.ExecPolicyBindingID.Valid || task.ExecPolicyBindingID.UUID != bindingID {
+					t.Fatalf("expected exec policy binding id to be set, got %+v", task.ExecPolicyBindingID)
+				}
+				return nil
+			})
+
+		rr := httptest.NewRecorder()
+		h.createTask(rr, req)
+
+		if status := rr.Code; status != http.StatusSeeOther {
+			t.Fatalf("createTask with exec policy returned wrong status: got %v want %v", status, http.StatusSeeOther)
 		}
 	})
 }

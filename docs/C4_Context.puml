@@ -3,9 +3,9 @@
 
 title Agent Management System Context Diagram
 
-Person(admin, "System Administrator", "Configures the platform, users and access policies.")
-Person(operator, "Operator", "Authenticated user with permissions limited by roles and agent access matrix.")
-System(agent_system, "Agent Management System", "System for executing tasks on remote machines with authentication and role-based access control.")
+Person(admin, "System Administrator", "Configures the platform, users, access policies, and saved EXEC_COMMAND policies and bindings.")
+Person(operator, "Operator", "Authenticated user with permissions limited by roles, agent access matrix, and EXEC_COMMAND policy permissions.")
+System(agent_system, "Agent Management System", "System for executing tasks on remote machines with authentication, role-based access control, and saved EXEC_COMMAND policies with per-agent bindings.")
 
 System_Ext(telegram, "Telegram API", "Messaging platform.")
 

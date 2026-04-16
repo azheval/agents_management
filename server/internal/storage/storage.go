@@ -80,6 +80,20 @@ type UserRepository interface {
 	EnsureRoles(ctx context.Context, roles []*Role) error
 }
 
+// ExecPolicyRepository defines access to saved EXEC_COMMAND policies and their agent bindings.
+type ExecPolicyRepository interface {
+	CreateExecCommandPolicy(ctx context.Context, policy *ExecCommandPolicy) error
+	UpdateExecCommandPolicy(ctx context.Context, policy *ExecCommandPolicy) error
+	DeleteExecCommandPolicy(ctx context.Context, id uuid.UUID) error
+	ListExecCommandPolicies(ctx context.Context) ([]*ExecCommandPolicy, error)
+	GetExecCommandPolicyByID(ctx context.Context, id uuid.UUID) (*ExecCommandPolicy, error)
+	CreateExecCommandPolicyBinding(ctx context.Context, binding *ExecCommandPolicyBinding) error
+	UpdateExecCommandPolicyBinding(ctx context.Context, binding *ExecCommandPolicyBinding) error
+	DeleteExecCommandPolicyBinding(ctx context.Context, id uuid.UUID) error
+	ListExecCommandPolicyBindings(ctx context.Context) ([]*ExecCommandPolicyBinding, error)
+	GetExecCommandPolicyBinding(ctx context.Context, policyID, agentID uuid.UUID) (*ExecCommandPolicyBinding, error)
+}
+
 // Storage is a container for all repositories.
 type Storage struct {
 	Agent        AgentRepository
@@ -88,10 +102,11 @@ type Storage struct {
 	Metric       MetricRepository
 	Notification NotificationRepository
 	User         UserRepository
+	ExecPolicy   ExecPolicyRepository
 }
 
 // NewStorage creates a new storage container.
-func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogRepository, metricRepo MetricRepository, notificationRepo NotificationRepository, userRepo UserRepository) *Storage {
+func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogRepository, metricRepo MetricRepository, notificationRepo NotificationRepository, userRepo UserRepository, execPolicyRepo ExecPolicyRepository) *Storage {
 	return &Storage{
 		Agent:        agentRepo,
 		Task:         taskRepo,
@@ -99,5 +114,6 @@ func NewStorage(agentRepo AgentRepository, taskRepo TaskRepository, logRepo LogR
 		Metric:       metricRepo,
 		Notification: notificationRepo,
 		User:         userRepo,
+		ExecPolicy:   execPolicyRepo,
 	}
 }

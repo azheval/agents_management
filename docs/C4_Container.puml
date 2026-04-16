@@ -7,8 +7,8 @@ Person(admin, "System Administrator")
 Person(operator, "Operator")
 
 System_Boundary(c1, "Agent Management System") {
-    Container(web_server, "Web Server", "Go, net/http", "Provides UI, access management, authentication, authorization and gRPC interface for agents.")
-    ContainerDb(database, "Database", "PostgreSQL", "Stores agent states, tasks, logs, results, users, roles and role assignments.")
+    Container(web_server, "Web Server", "Go, net/http", "Provides UI, access management, authentication, authorization, saved EXEC_COMMAND policy management, and gRPC interface for agents.")
+    ContainerDb(database, "Database", "PostgreSQL", "Stores agent states, tasks, logs, results, users, roles, role assignments, saved EXEC_COMMAND policies, and per-agent policy bindings.")
 }
 
 Container(agent, "Agent", "Go, gRPC", "Executes tasks on managed machine. Deployed on each machine.")

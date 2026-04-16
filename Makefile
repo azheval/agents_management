@@ -64,6 +64,8 @@ db-migrate:
 	docker exec -i agent_db psql -U admin -d agent_management < db/migrations/008_add_scheduling_to_tasks.sql
 	docker exec -i agent_db psql -U admin -d agent_management < db/migrations/009_add_notification_storage.sql
 	docker exec -i agent_db psql -U admin -d agent_management < db/migrations/010_add_task_notification_settings.sql
+	docker exec -i agent_db psql -U admin -d agent_management < db/migrations/011_add_user_auth.sql
+	docker exec -i agent_db psql -U admin -d agent_management < db/migrations/012_add_exec_command_policies.sql
 
 # Quick migration for fresh installs
 db-migrate-fresh:

@@ -45,8 +45,8 @@
                         <div><strong class="text-gray-600">Result Contract:</strong> <span>{{if .ResultContract.Valid}}{{.ResultContract.String}}{{else}}N/A{{end}}</span></div>
                         <div><strong class="text-gray-600">Rule Set:</strong> <span>{{if .NotificationRuleSet.Valid}}{{.NotificationRuleSet.String}}{{else}}default{{end}}</span></div>
                         <div class="col-span-full"><strong class="text-gray-600">Destinations:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if .DefaultDestinations}}{{range .DefaultDestinations}}{{.}} {{end}}{{else}}N/A{{end}}</code></div>
-                        <div class="col-span-full"><strong class="text-gray-600">Command:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if .Command.Valid}}{{.Command.String}}{{else}}N/A{{end}}</code></div>
-                        <div class="col-span-full"><strong class="text-gray-600">Arguments:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{range .Args}}{{.}} {{end}}</code></div>
+                        <div class="col-span-full"><strong class="text-gray-600">Command:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if $.CanViewExecCommandDetails}}{{if .Command.Valid}}{{.Command.String}}{{else}}N/A{{end}}{{else}}Hidden by exec policy permissions{{end}}</code></div>
+                        <div class="col-span-full"><strong class="text-gray-600">Arguments:</strong> <code class="bg-gray-100 p-1 rounded text-xs">{{if $.CanViewExecCommandDetails}}{{range .Args}}{{.}} {{end}}{{else}}Hidden by exec policy permissions{{end}}</code></div>
                         <div><strong class="text-gray-600">Created At:</strong> <span>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</span></div>
                         <div><strong class="text-gray-600">Started At:</strong> <span>{{if .StartedAt.Valid}}{{.StartedAt.Time.Format "2006-01-02 15:04:05"}}{{else}}N/A{{end}}</span></div>
                         <div><strong class="text-gray-600">Completed At:</strong> <span>{{if .CompletedAt.Valid}}{{.CompletedAt.Time.Format "2006-01-02 15:04:05"}}{{else}}N/A{{end}}</span></div>

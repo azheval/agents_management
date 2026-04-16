@@ -64,16 +64,22 @@ docker exec -i agent_db psql -U admin -d agent_management < db/migrations/001_fu
 
 ![img_013.png](/docs/img/img_013.png)
 
-У сістэме выкарыстоўваюцца тры групы правоў:
+У сістэме выкарыстоўваюцца чатыры групы правоў:
 
 - `admin` і `full_access` даюць поўны доступ да ўсіх раздзелаў і ўсіх агентаў.
 - Глабальныя ролі `action.*` вызначаюць, якія тыпы задач карыстальнік можа ствараць.
 - Правы выгляду `agent:<uuid>:...` вызначаюць, якія дзеянні дазволены для канкрэтнага агента.
+- Правы `exec_policy:<uuid>:use|view|manage` вызначаюць доступ да захаваных палітык `EXEC_COMMAND`.
 
 Для стварэння задачы карыстальніку неабходны адначасова:
 
 - глабальная роля дзеяння, якая адпавядае тыпу задачы, напрыклад `action.exec_command`;
 - права `agent:<uuid>:task_create` для выбранага агента.
+- `exec_policy:<policy_uuid>:use`
+
+Для прагляду выніковых `command` і `args` у policy-backed задачы дадаткова патрабуецца:
+
+- `exec_policy:<policy_uuid>:view`
 
 Матрыца правоў у раздзеле `Access` дазваляе прызначаць дазволы на скрыжаванні карыстальніка, агента і аперацыі. Праз яе можна асобна выдаваць правы на:
 
@@ -85,6 +91,74 @@ docker exec -i agent_db psql -U admin -d agent_management < db/migrations/001_fu
 - прагляд апавяшчэнняў;
 - пераключэнне стану агента;
 - выдаленне агента.
+
+## Палітыкі EXEC_COMMAND
+
+Захаваныя палітыкі `EXEC_COMMAND` прызначаны для бяспечнага і паўторна выкарыстоўваемага запуску каманд.
+
+Палітыка захоўвае:
+
+- назву і апісанне
+- шаблон каманды
+- шаблон аргументаў
+- схему параметраў
+
+Binding захоўвае значэнні для канкрэтнага агента:
+
+- мэтавы агент
+- неабавязковы override шаблона каманды
+- неабавязковы override шаблона аргументаў
+- JSON са значэннямі параметраў
+
+У шаблонах выкарыстоўваецца сінтаксіс з падвойнымі фігурнымі дужкамі:
+
+- `{{target}}`
+- `{{count}}`
+
+Прыклад палітыкі для `ping`:
+
+- `Command Template`: `ping`
+- `Args Template`: `-n,{{count}},{{target}}`
+
+Прыклад схемы параметраў:
+
+```json
+[
+  {
+    "name": "target",
+    "label": "Target",
+    "type": "text",
+    "required": true,
+    "editable": false
+  },
+  {
+    "name": "count",
+    "label": "Count",
+    "type": "number",
+    "required": true,
+    "editable": true,
+    "default_value": "4"
+  }
+]
+```
+
+Прыклад binding для агента:
+
+```json
+{
+  "target": "127.0.0.1"
+}
+```
+
+Пасля рэзалву задача выканае:
+
+```text
+ping -n 4 127.0.0.1
+```
+
+![img_014.png](/docs/img/img_014.png)
+
+![img_015.png](/docs/img/img_015.png)
 
 Рэкамендаваны парадак наладжвання:
 
@@ -107,6 +181,10 @@ docker exec -i agent_db psql -U admin -d agent_management < db/migrations/001_fu
 ![img_002.png](/docs/img/img_002.png)
 
 Запаўняецца апісанне задачы, каманда (напрыклад, `C:/ws/tech_log/go/techlog-stat/.dist/techlog-stat.exe`), аргументы каманды паказваюцца праз коску (напрыклад, `sdbl-context,--input,C:/ws/tech_log/logs,--glob,*/*.*,--output,C:/ws/tech_log/out/sdbl_agent,--top,10`).
+
+Пры выкарыстанні шаблонаў дастаткова абраць шаблон.
+
+![img_016.png](/docs/img/img_016.png)
 
 #### EXEC_PYTHON_SCRIPT
 
