@@ -111,11 +111,9 @@
                         <label for="task_type" class="block text-gray-700 text-sm font-bold mb-2">Task Type:</label>
                         <select name="task_type" id="task_type" required class="block w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 focus:outline-none focus:ring-blue-500 focus:border-blue-500" onchange="updateForm()">
                             <option value="">-- Select a Type --</option>
-                            <option value="EXEC_COMMAND" data-description="Executes a shell command on the selected agent(s).">EXEC_COMMAND</option>
-                            <option value="EXEC_PYTHON_SCRIPT" data-description="Executes a Python script on the selected agent(s).">EXEC_PYTHON_SCRIPT</option>
-                            <option value="FETCH_FILE" data-description="Copies a file from the selected agent(s) back to the server.">FETCH_FILE</option>
-                            <option value="PUSH_FILE" data-description="Sends a file from the server to the selected agent(s).">PUSH_FILE</option>
-                            <option value="AGENT_UPDATE" data-description="Updates the agent binary on the selected machine(s).">AGENT_UPDATE</option>
+                            {{range .AvailableTaskTypes}}
+                            <option value="{{.Value}}" data-description="{{.Description}}">{{.Value}}</option>
+                            {{end}}
                         </select>
                         <div id="task_type_description" class="text-sm text-gray-600 mt-2 min-h-[20px]"></div>
                     </div>

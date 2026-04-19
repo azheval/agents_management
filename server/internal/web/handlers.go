@@ -40,8 +40,14 @@ type NewTaskPageData struct {
 		ID          string
 		Description string
 	}
-	ExecPoliciesJSON template.JS
-	Error            string
+	AvailableTaskTypes []TaskTypeOption
+	ExecPoliciesJSON   template.JS
+	Error              string
+}
+
+type TaskTypeOption struct {
+	Value       string
+	Description string
 }
 
 type AgentMetricsPageData struct {
@@ -1325,9 +1331,10 @@ func (h *Handlers) showNewTaskForm(w http.ResponseWriter, r *http.Request, formE
 	}
 
 	pageData := NewTaskPageData{
-		Agents:           agents,
-		SelectableTasks:  selectableTasks,
-		ExecPoliciesJSON: template.JS(policiesJSON),
+		Agents:             agents,
+		SelectableTasks:    selectableTasks,
+		AvailableTaskTypes: h.availableTaskTypes(r.Context()),
+		ExecPoliciesJSON:   template.JS(policiesJSON),
 	}
 	if formError != nil {
 		pageData.Error = formError.Error()
@@ -1415,7 +1422,7 @@ func (h *Handlers) createTask(w http.ResponseWriter, r *http.Request) {
 			h.showNewTaskForm(w, r, fmt.Errorf("invalid agent ID: %s", agentIDStr))
 			return
 		}
-		if !h.canCreateTasks(r.Context(), agentID) {
+		if !h.canCreateTaskTypeForAgent(r.Context(), agentID, taskType) {
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
@@ -1716,6 +1723,16 @@ func accessPermissionOptions() []AccessPermissionOption {
 	}
 }
 
+func availableTaskTypeOptions() []TaskTypeOption {
+	return []TaskTypeOption{
+		{Value: string(storage.TaskTypeExecCommand), Description: "Executes a shell command on the selected agent(s)."},
+		{Value: string(storage.TaskTypeExecPythonScript), Description: "Executes a Python script on the selected agent(s)."},
+		{Value: string(storage.TaskTypeFetchFile), Description: "Copies a file from the selected agent(s) back to the server."},
+		{Value: string(storage.TaskTypePushFile), Description: "Sends a file from the server to the selected agent(s)."},
+		{Value: string(storage.TaskTypeAgentUpdate), Description: "Updates the agent binary on the selected machine(s)."},
+	}
+}
+
 func execPolicyPermissionOptions() []AccessPermissionOption {
 	return []AccessPermissionOption{
 		{Key: auth.ExecPolicyPermissionUse, Label: "Use", Description: "Use the policy when creating EXEC_COMMAND tasks"},
@@ -1852,6 +1869,10 @@ func (h *Handlers) canCreateTasks(ctx context.Context, agentID uuid.UUID) bool {
 	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionTaskCreate)
 }
 
+func (h *Handlers) canCreateTaskTypeForAgent(ctx context.Context, agentID uuid.UUID, taskType storage.TaskType) bool {
+	return h.canRunTaskType(ctx, taskType) && h.canCreateTasks(ctx, agentID)
+}
+
 func (h *Handlers) canRescheduleTasks(ctx context.Context, agentID uuid.UUID) bool {
 	principal := auth.PrincipalFromContext(ctx)
 	return principal == nil || principal.HasAgentPermission(agentID, auth.AgentPermissionTaskReschedule)
@@ -1905,6 +1926,22 @@ func (h *Handlers) filterAgentsForTaskCreation(ctx context.Context, agents []*st
 	for _, agent := range agents {
 		if agent != nil && principal.HasAgentPermission(agent.ID, auth.AgentPermissionTaskCreate) {
 			filtered = append(filtered, agent)
+		}
+	}
+	return filtered
+}
+
+func (h *Handlers) availableTaskTypes(ctx context.Context) []TaskTypeOption {
+	principal := auth.PrincipalFromContext(ctx)
+	if principal == nil || principal.IsAdmin() {
+		return availableTaskTypeOptions()
+	}
+
+	all := availableTaskTypeOptions()
+	filtered := make([]TaskTypeOption, 0, len(all))
+	for _, option := range all {
+		if principal.CanRunTaskType(storage.TaskType(option.Value)) {
+			filtered = append(filtered, option)
 		}
 	}
 	return filtered

@@ -388,6 +388,64 @@ func TestCreateTask(t *testing.T) {
 			t.Fatalf("createTask with exec policy returned wrong status: got %v want %v", status, http.StatusSeeOther)
 		}
 	})
+
+	t.Run("exec python script succeeds with matching action role", func(t *testing.T) {
+		values := map[string]string{
+			"agent_id":          agentID.String(),
+			"task_type":         "EXEC_PYTHON_SCRIPT",
+			"entrypoint_script": "main.py",
+		}
+		req, err := createMultipartRequest(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req = req.WithContext(auth.WithPrincipal(req.Context(), auth.NewPrincipal("operator", []string{
+			auth.RoleForTaskType(storage.TaskTypeExecPythonScript),
+			auth.RoleForAgentPermission(agentID, auth.AgentPermissionTaskCreate),
+		})))
+
+		mockTaskRepo.EXPECT().
+			CreateTask(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(_ any, task *storage.Task) error {
+				if task.TaskType != storage.TaskTypeExecPythonScript {
+					t.Fatalf("expected task type %s, got %s", storage.TaskTypeExecPythonScript, task.TaskType)
+				}
+				if !task.EntrypointScript.Valid || task.EntrypointScript.String != "main.py" {
+					t.Fatalf("expected entrypoint main.py, got %+v", task.EntrypointScript)
+				}
+				return nil
+			})
+
+		rr := httptest.NewRecorder()
+		h.createTask(rr, req)
+
+		if status := rr.Code; status != http.StatusSeeOther {
+			t.Fatalf("createTask for EXEC_PYTHON_SCRIPT returned wrong status: got %v want %v", status, http.StatusSeeOther)
+		}
+	})
+
+	t.Run("exec python script forbidden with exec command role only", func(t *testing.T) {
+		values := map[string]string{
+			"agent_id":          agentID.String(),
+			"task_type":         "EXEC_PYTHON_SCRIPT",
+			"entrypoint_script": "main.py",
+		}
+		req, err := createMultipartRequest(values)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req = req.WithContext(auth.WithPrincipal(req.Context(), auth.NewPrincipal("operator", []string{
+			auth.RoleForTaskType(storage.TaskTypeExecCommand),
+			auth.RoleForAgentPermission(agentID, auth.AgentPermissionTaskCreate),
+		})))
+
+		rr := httptest.NewRecorder()
+		h.createTask(rr, req)
+
+		if status := rr.Code; status != http.StatusForbidden {
+			t.Fatalf("createTask for EXEC_PYTHON_SCRIPT without matching action role returned wrong status: got %v want %v", status, http.StatusForbidden)
+		}
+	})
 }
 
 func TestUpdateTaskSchedule(t *testing.T) {
